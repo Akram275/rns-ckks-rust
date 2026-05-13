@@ -1,0 +1,2961 @@
+\documentclass[11pt,a4paper]{article}
+
+% Packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+
+% Page geometry
+\geometry{margin=1in}
+
+% Theorem environments
+\newtheorem{definition}{Definition}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{remark}{Remark}
+
+% Code listing style
+\lstset{
+    language=Rust,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue},
+    commentstyle=\color{gray},
+    stringstyle=\color{red},
+    numbers=left,
+    numberstyle=\tiny,
+    breaklines=true,
+    frame=single
+}
+
+% Custom commands
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\Zq}{\mathbb{Z}_q}
+\newcommand{\Rq}{R_q}
+\newcommand{\bmod}{\text{ mod }}
+
+\title{\textbf{RNS-CKKS Implementation in Rust}\\[0.5em]
+\large Mathematical Foundations and Algorithms}
+\author{CKKS Implementation Documentation}
+\date{March 2026}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+\newpage
+
+%==============================================================================
+\section{Introduction}
+%==============================================================================
+
+This document provides a detailed mathematical description of the algorithms implemented in our Rust-based RNS-CKKS homomorphic encryption library. The CKKS scheme (Cheon-Kim-Kim-Song) enables approximate arithmetic on encrypted data, making it particularly suitable for machine learning and statistical computations on encrypted data.
+
+Our implementation follows the RNS (Residue Number System) variant, which improves computational efficiency by representing large integers as tuples of residues modulo smaller coprime integers.
+
+%==============================================================================
+\section{Modular Arithmetic}
+%==============================================================================
+
+All operations in CKKS are performed modulo prime numbers. This section describes the fundamental modular arithmetic operations.
+
+%------------------------------------------------------------------------------
+\subsection{Modular Addition and Subtraction}
+%------------------------------------------------------------------------------
+
+\begin{definition}[Modular Addition]
+For integers $a, b$ and modulus $m > 0$:
+\[
+(a + b) \bmod m = r \quad \text{where } r \in [0, m) \text{ and } m \mid (a + b - r)
+\]
+\end{definition}
+
+\begin{algorithm}[H]
+\caption{Modular Addition}
+\begin{algorithmic}[1]
+\Function{ModAdd}{$a, b, m$}
+    \State \Return $(a + b) \bmod m$
+    \Comment{Use 128-bit intermediate to prevent overflow}
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\begin{definition}[Modular Subtraction]
+For integers $a, b$ and modulus $m > 0$:
+\[
+(a - b) \bmod m = 
+\begin{cases}
+(a - b) \bmod m & \text{if } a \geq b \\
+m - ((b - a) \bmod m) & \text{if } a < b
+\end{cases}
+\]
+\end{definition}
+
+\begin{algorithm}[H]
+\caption{Modular Subtraction}
+\begin{algorithmic}[1]
+\Function{ModSub}{$a, b, m$}
+    \If{$a \geq b$}
+        \State \Return $(a - b) \bmod m$
+    \Else
+        \State \Return $m - ((b - a) \bmod m)$
+    \EndIf
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Complexity:} $O(1)$ for both operations.
+
+%------------------------------------------------------------------------------
+\subsection{Modular Multiplication}
+%------------------------------------------------------------------------------
+
+\begin{definition}[Modular Multiplication]
+For integers $a, b$ and modulus $m > 0$:
+\[
+(a \cdot b) \bmod m = r \quad \text{where } r \in [0, m) \text{ and } m \mid (ab - r)
+\]
+\end{definition}
+
+\begin{algorithm}[H]
+\caption{Modular Multiplication}
+\begin{algorithmic}[1]
+\Function{ModMul}{$a, b, m$}
+    \State \Return $(a \times b) \bmod m$
+    \Comment{Use 128-bit intermediate: $a, b < 2^{64}$, so $ab < 2^{128}$}
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Complexity:} $O(1)$ (constant time for fixed-width integers).
+
+%------------------------------------------------------------------------------
+\subsection{Modular Exponentiation (Square-and-Multiply)}
+%------------------------------------------------------------------------------
+
+Naive exponentiation $a^n$ requires $n-1$ multiplications, which is exponential in the bit-length of $n$. The \textbf{binary exponentiation} (square-and-multiply) algorithm computes $a^n \bmod m$ in $O(\log n)$ multiplications.
+
+\begin{theorem}
+For any integer $n$ with binary representation $n = \sum_{i=0}^{k} b_i 2^i$ where $b_i \in \{0,1\}$:
+\[
+a^n = a^{\sum_{i=0}^{k} b_i 2^i} = \prod_{i: b_i = 1} a^{2^i}
+\]
+\end{theorem}
+
+\begin{algorithm}[H]
+\caption{Binary Exponentiation (Square-and-Multiply)}
+\begin{algorithmic}[1]
+\Function{ModExp}{$\text{base}, \text{exp}, m$}
+    \If{$m = 1$}
+        \State \Return $0$
+    \EndIf
+    \State $\text{result} \gets 1$
+    \State $\text{base} \gets \text{base} \bmod m$
+    \While{$\text{exp} > 0$}
+        \If{$\text{exp} \land 1 = 1$} \Comment{If lowest bit is 1}
+            \State $\text{result} \gets (\text{result} \times \text{base}) \bmod m$
+        \EndIf
+        \State $\text{base} \gets (\text{base} \times \text{base}) \bmod m$ \Comment{Square}
+        \State $\text{exp} \gets \text{exp} \gg 1$ \Comment{Right shift (divide by 2)}
+    \EndWhile
+    \State \Return result
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Example:} Computing $2^{13} \bmod 1000$:
+\begin{itemize}
+    \item $13 = (1101)_2 = 8 + 4 + 1$
+    \item $2^{13} = 2^8 \cdot 2^4 \cdot 2^1 = 256 \cdot 16 \cdot 2 = 8192$
+    \item $8192 \bmod 1000 = 192$
+\end{itemize}
+
+\textbf{Complexity:} $O(\log n)$ multiplications, where $n$ is the exponent.
+
+%------------------------------------------------------------------------------
+\subsection{Modular Inverse}
+%------------------------------------------------------------------------------
+
+\begin{definition}[Modular Inverse]
+The modular inverse of $a$ modulo $m$ is an integer $x$ such that:
+\[
+a \cdot x \equiv 1 \pmod{m}
+\]
+The inverse exists if and only if $\gcd(a, m) = 1$.
+\end{definition}
+
+\subsubsection{Method 1: Fermat's Little Theorem (Prime Modulus)}
+
+\begin{theorem}[Fermat's Little Theorem]
+For prime $p$ and integer $a$ not divisible by $p$:
+\[
+a^{p-1} \equiv 1 \pmod{p}
+\]
+Therefore:
+\[
+a^{-1} \equiv a^{p-2} \pmod{p}
+\]
+\end{theorem}
+
+\begin{algorithm}[H]
+\caption{Modular Inverse via Fermat's Little Theorem}
+\begin{algorithmic}[1]
+\Function{ModInv}{$a, p$} \Comment{$p$ must be prime}
+    \State \Return \Call{ModExp}{$a, p-2, p$}
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Complexity:} $O(\log p)$ using binary exponentiation.
+
+\subsubsection{Method 2: Extended Euclidean Algorithm (General Case)}
+
+\begin{theorem}[Bézout's Identity]
+For any integers $a, b$, there exist integers $x, y$ such that:
+\[
+ax + by = \gcd(a, b)
+\]
+\end{theorem}
+
+If $\gcd(a, m) = 1$, then $ax + my = 1$, which means $ax \equiv 1 \pmod{m}$.
+
+\begin{algorithm}[H]
+\caption{Extended Euclidean Algorithm}
+\begin{algorithmic}[1]
+\Function{ExtendedGCD}{$a, b$}
+    \If{$a = 0$}
+        \State \Return $(b, 0, 1)$ \Comment{Returns $(\gcd, x, y)$}
+    \EndIf
+    \State $(\text{gcd}, x_1, y_1) \gets$ \Call{ExtendedGCD}{$b \bmod a, a$}
+    \State $x \gets y_1 - \lfloor b/a \rfloor \cdot x_1$
+    \State $y \gets x_1$
+    \State \Return $(\text{gcd}, x, y)$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Complexity:} $O(\log(\min(a, b)))$.
+
+%------------------------------------------------------------------------------
+\subsection{Miller-Rabin Primality Test}
+%------------------------------------------------------------------------------
+
+The Miller-Rabin test is a probabilistic primality test based on the following:
+
+\begin{theorem}
+Let $n > 2$ be an odd integer. Write $n - 1 = 2^r \cdot d$ where $d$ is odd. For any $a$ coprime to $n$, if $n$ is prime, then either:
+\begin{enumerate}
+    \item $a^d \equiv 1 \pmod{n}$, or
+    \item $a^{2^i \cdot d} \equiv -1 \pmod{n}$ for some $0 \leq i < r$
+\end{enumerate}
+\end{theorem}
+
+\begin{algorithm}[H]
+\caption{Miller-Rabin Primality Test}
+\begin{algorithmic}[1]
+\Function{IsPrime}{$n$}
+    \If{$n < 2$} \Return false \EndIf
+    \If{$n = 2$ or $n = 3$} \Return true \EndIf
+    \If{$n \bmod 2 = 0$} \Return false \EndIf
+    \State Write $n - 1 = 2^r \cdot d$ with $d$ odd
+    \State witnesses $\gets [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37]$
+    \For{each $a$ in witnesses}
+        \If{$a \geq n$} \textbf{continue} \EndIf
+        \State $x \gets a^d \bmod n$
+        \If{$x = 1$ or $x = n - 1$} \textbf{continue} \EndIf
+        \State composite $\gets$ true
+        \For{$i \gets 0$ to $r - 2$}
+            \State $x \gets x^2 \bmod n$
+            \If{$x = n - 1$}
+                \State composite $\gets$ false
+                \State \textbf{break}
+            \EndIf
+        \EndFor
+        \If{composite} \Return false \EndIf
+    \EndFor
+    \State \Return true
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\begin{remark}
+With the witnesses $\{2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37\}$, the test is deterministic for all $n < 2^{64}$.
+\end{remark}
+
+\textbf{Complexity:} $O(k \log^2 n)$ where $k$ is the number of witnesses.
+
+%------------------------------------------------------------------------------
+\subsection{Finding Primitive Roots of Unity}
+%------------------------------------------------------------------------------
+
+\begin{definition}[Primitive $n$-th Root of Unity]
+An element $\omega \in \Z_p$ is a primitive $n$-th root of unity if:
+\begin{enumerate}
+    \item $\omega^n \equiv 1 \pmod{p}$
+    \item $\omega^k \not\equiv 1 \pmod{p}$ for all $0 < k < n$
+\end{enumerate}
+\end{definition}
+
+\begin{theorem}
+A primitive $n$-th root of unity exists in $\Z_p$ if and only if $n \mid (p-1)$.
+\end{theorem}
+
+\begin{algorithm}[H]
+\caption{Find Primitive Root of Unity}
+\begin{algorithmic}[1]
+\Function{FindPrimitiveRoot}{$n, p$}
+    \If{$(p - 1) \bmod n \neq 0$}
+        \State \Return None \Comment{$n$ must divide $p-1$}
+    \EndIf
+    \State $g \gets$ \Call{FindGenerator}{$p$} \Comment{Primitive root of $\Z_p^*$}
+    \State \Return $g^{(p-1)/n} \bmod p$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[H]
+\caption{Find Generator of $\Z_p^*$}
+\begin{algorithmic}[1]
+\Function{FindGenerator}{$p$}
+    \State factors $\gets$ prime factors of $(p - 1)$
+    \For{$g \gets 2$ to $p - 1$}
+        \State isGenerator $\gets$ true
+        \For{each prime factor $q$ of $(p-1)$}
+            \If{$g^{(p-1)/q} \equiv 1 \pmod{p}$}
+                \State isGenerator $\gets$ false
+                \State \textbf{break}
+            \EndIf
+        \EndFor
+        \If{isGenerator}
+            \State \Return $g$
+        \EndIf
+    \EndFor
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+%==============================================================================
+\section{Number Theoretic Transform (NTT)}
+%==============================================================================
+
+The Number Theoretic Transform is the modular arithmetic analogue of the Fast Fourier Transform (FFT). It enables polynomial multiplication in $O(n \log n)$ time instead of $O(n^2)$.
+
+%------------------------------------------------------------------------------
+\subsection{Mathematical Foundation}
+%------------------------------------------------------------------------------
+
+\begin{definition}[NTT]
+Let $\omega$ be a primitive $n$-th root of unity in $\Z_p$. The NTT of a vector $(a_0, a_1, \ldots, a_{n-1})$ is:
+\[
+A_k = \sum_{j=0}^{n-1} a_j \omega^{jk} \pmod{p}, \quad k = 0, 1, \ldots, n-1
+\]
+\end{definition}
+
+\begin{definition}[Inverse NTT]
+The inverse NTT is:
+\[
+a_j = \frac{1}{n} \sum_{k=0}^{n-1} A_k \omega^{-jk} \pmod{p}, \quad j = 0, 1, \ldots, n-1
+\]
+\end{definition}
+
+\begin{theorem}[Convolution Theorem]
+For polynomials $a(x)$ and $b(x)$, if $A = \text{NTT}(a)$ and $B = \text{NTT}(b)$, then:
+\[
+\text{NTT}^{-1}(A \odot B) = a \cdot b
+\]
+where $\odot$ denotes component-wise multiplication.
+\end{theorem}
+
+%------------------------------------------------------------------------------
+\subsection{NTT Context Pre-computation}
+%------------------------------------------------------------------------------
+
+To avoid redundant computation, we pre-compute and store:
+\begin{itemize}
+    \item $\omega$: primitive $2n$-th root of unity (for negacyclic convolution)
+    \item $\omega^{-1}$: inverse of $\omega$
+    \item $n^{-1}$: inverse of $n$ (for scaling in inverse NTT)
+    \item $[\omega^0, \omega^1, \omega^2, \ldots, \omega^{n-1}]$: pre-computed powers
+    \item $[\omega^{-0}, \omega^{-1}, \omega^{-2}, \ldots, \omega^{-(n-1)}]$: inverse powers
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{Bit-Reversal Permutation}
+%------------------------------------------------------------------------------
+
+The Cooley-Tukey algorithm requires reordering the input by bit-reversal.
+
+\begin{definition}[Bit-Reversal]
+For an index $i$ with $\log_2 n$ bits, the bit-reversed index $\text{rev}(i)$ is obtained by reversing the binary representation of $i$.
+\end{definition}
+
+\textbf{Example for $n = 8$:}
+\begin{center}
+\begin{tabular}{c|c|c}
+\toprule
+Index & Binary & Bit-Reversed \\
+\midrule
+0 & 000 & 000 $\to$ 0 \\
+1 & 001 & 100 $\to$ 4 \\
+2 & 010 & 010 $\to$ 2 \\
+3 & 011 & 110 $\to$ 6 \\
+4 & 100 & 001 $\to$ 1 \\
+5 & 101 & 101 $\to$ 5 \\
+6 & 110 & 011 $\to$ 3 \\
+7 & 111 & 111 $\to$ 7 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{algorithm}[H]
+\caption{Bit-Reversal}
+\begin{algorithmic}[1]
+\Function{BitReverse}{$x, \log_n$}
+    \State result $\gets 0$
+    \For{$i \gets 0$ to $\log_n - 1$}
+        \State result $\gets$ (result $\ll 1$) $|$ ($x$ \& 1)
+        \State $x \gets x \gg 1$
+    \EndFor
+    \State \Return result
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+%------------------------------------------------------------------------------
+\subsection{Cooley-Tukey Forward NTT}
+%------------------------------------------------------------------------------
+
+The Cooley-Tukey algorithm is a divide-and-conquer approach that recursively splits the DFT into smaller DFTs.
+
+\begin{algorithm}[H]
+\caption{Cooley-Tukey Iterative NTT}
+\begin{algorithmic}[1]
+\Function{NTTForward}{$a, \omega, p$}
+    \State $n \gets |a|$
+    \State $\log_n \gets \log_2 n$
+    \State $A \gets$ \Call{BitReverseCopy}{$a, \log_n$}
+    \State $m \gets 1$
+    \For{$s \gets 0$ to $\log_n - 1$}
+        \State $m_2 \gets 2m$
+        \State step $\gets n / m_2$
+        \For{$k \gets 0$ to $n - 1$ step $m_2$}
+            \State $w \gets 1$
+            \For{$j \gets 0$ to $m - 1$}
+                \State $t \gets w \cdot A[k + j + m] \bmod p$ \Comment{Butterfly}
+                \State $u \gets A[k + j]$
+                \State $A[k + j] \gets (u + t) \bmod p$
+                \State $A[k + j + m] \gets (u - t) \bmod p$
+                \State $w \gets w \cdot \omega^{\text{step}} \bmod p$ \Comment{Update twiddle}
+            \EndFor
+        \EndFor
+        \State $m \gets m_2$
+    \EndFor
+    \State \Return $A$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Butterfly Operation:}
+The core operation combines two elements using:
+\begin{align}
+A[k+j] &\gets A[k+j] + \omega^j \cdot A[k+j+m] \\
+A[k+j+m] &\gets A[k+j] - \omega^j \cdot A[k+j+m]
+\end{align}
+
+\textbf{Complexity:} $O(n \log n)$ multiplications and additions.
+
+%------------------------------------------------------------------------------
+\subsection{Gentleman-Sande Inverse NTT}
+%------------------------------------------------------------------------------
+
+The inverse NTT uses $\omega^{-1}$ instead of $\omega$ and scales by $n^{-1}$ at the end.
+
+\begin{algorithm}[H]
+\caption{Inverse NTT}
+\begin{algorithmic}[1]
+\Function{NTTInverse}{$A, \omega^{-1}, n^{-1}, p$}
+    \State $a \gets$ \Call{NTTForward}{$A, \omega^{-1}, p$} \Comment{Same structure with $\omega^{-1}$}
+    \For{$i \gets 0$ to $n - 1$}
+        \State $a[i] \gets a[i] \cdot n^{-1} \bmod p$ \Comment{Scale by $1/n$}
+    \EndFor
+    \State \Return $a$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+%------------------------------------------------------------------------------
+\subsection{Polynomial Multiplication via NTT}
+%------------------------------------------------------------------------------
+
+To multiply polynomials $a(x)$ and $b(x)$:
+
+\begin{algorithm}[H]
+\caption{NTT Polynomial Multiplication}
+\begin{algorithmic}[1]
+\Function{NTTMultiply}{$a, b$}
+    \State $A \gets$ \Call{NTTForward}{$a$}
+    \State $B \gets$ \Call{NTTForward}{$b$}
+    \State $C[i] \gets A[i] \cdot B[i] \bmod p$ for all $i$ \Comment{Point-wise multiply}
+    \State \Return \Call{NTTInverse}{$C$}
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Total Complexity:} $O(n \log n)$ vs. $O(n^2)$ for naive multiplication.
+
+%==============================================================================
+\section{Polynomial Ring Operations}
+%==============================================================================
+
+In CKKS, we work in the polynomial ring:
+\[
+\Rq = \Zq[X]/(X^N + 1)
+\]
+where $N$ is a power of 2 and $q$ is the ciphertext modulus.
+
+%------------------------------------------------------------------------------
+\subsection{The Ring Structure}
+%------------------------------------------------------------------------------
+
+\begin{definition}[Polynomial Ring $\Rq$]
+Elements are polynomials of degree $< N$ with coefficients in $\Zq$:
+\[
+a(X) = \sum_{i=0}^{N-1} a_i X^i, \quad a_i \in \Zq
+\]
+The quotient by $(X^N + 1)$ imposes:
+\[
+X^N \equiv -1 \pmod{X^N + 1}
+\]
+\end{definition}
+
+%------------------------------------------------------------------------------
+\subsection{Polynomial Addition and Subtraction}
+%------------------------------------------------------------------------------
+
+Addition and subtraction are coefficient-wise:
+\[
+(a + b)_i = a_i + b_i \bmod q
+\]
+\[
+(a - b)_i = a_i - b_i \bmod q
+\]
+
+\textbf{Complexity:} $O(N)$.
+
+%------------------------------------------------------------------------------
+\subsection{Scalar Multiplication}
+%------------------------------------------------------------------------------
+
+\[
+(c \cdot a)_i = c \cdot a_i \bmod q
+\]
+
+\textbf{Complexity:} $O(N)$.
+
+%------------------------------------------------------------------------------
+\subsection{Polynomial Negation}
+%------------------------------------------------------------------------------
+
+\[
+(-a)_i = \begin{cases}
+0 & \text{if } a_i = 0 \\
+q - a_i & \text{otherwise}
+\end{cases}
+\]
+
+%------------------------------------------------------------------------------
+\subsection{Naive Polynomial Multiplication (Negacyclic)}
+%------------------------------------------------------------------------------
+
+For the ring $\Zq[X]/(X^N + 1)$, multiplication wraps with sign change:
+
+\begin{algorithm}[H]
+\caption{Naive Polynomial Multiplication in $\Rq$}
+\begin{algorithmic}[1]
+\Function{NaiveMul}{$a, b, q, N$}
+    \State $c \gets [0, 0, \ldots, 0]$ \Comment{$N$ zeros}
+    \For{$i \gets 0$ to $N - 1$}
+        \For{$j \gets 0$ to $N - 1$}
+            \State $\text{idx} \gets i + j$
+            \State product $\gets a_i \cdot b_j \bmod q$
+            \If{$\text{idx} < N$}
+                \State $c[\text{idx}] \gets (c[\text{idx}] + \text{product}) \bmod q$
+            \Else
+                \State $c[\text{idx} - N] \gets (c[\text{idx} - N] - \text{product}) \bmod q$
+                \Comment{$X^N = -1$}
+            \EndIf
+        \EndFor
+    \EndFor
+    \State \Return $c$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Example:} In $\Z_{17}[X]/(X^4 + 1)$:
+\begin{align*}
+X^3 \cdot X &= X^4 = -1 \equiv 16 \pmod{17}
+\end{align*}
+
+\textbf{Complexity:} $O(N^2)$ — use NTT for better performance.
+
+%==============================================================================
+\section{Residue Number System (RNS)}
+%==============================================================================
+
+RNS enables efficient computation on large integers by representing them via their residues modulo several smaller coprime moduli.
+
+%------------------------------------------------------------------------------
+\subsection{Mathematical Foundation}
+%------------------------------------------------------------------------------
+
+\begin{theorem}[Chinese Remainder Theorem]
+Let $q_0, q_1, \ldots, q_L$ be pairwise coprime integers and $Q = \prod_{i=0}^{L} q_i$. There is a ring isomorphism:
+\[
+\Z_Q \cong \Z_{q_0} \times \Z_{q_1} \times \cdots \times \Z_{q_L}
+\]
+Any $x \in \Z_Q$ is uniquely determined by $(x \bmod q_0, x \bmod q_1, \ldots, x \bmod q_L)$.
+\end{theorem}
+
+%------------------------------------------------------------------------------
+\subsection{RNS Polynomial Representation}
+%------------------------------------------------------------------------------
+
+An RNS polynomial stores a polynomial's residues for each prime in the modulus chain:
+\[
+\text{RNS}(a) = (a \bmod q_0, a \bmod q_1, \ldots, a \bmod q_L)
+\]
+
+\textbf{Advantages:}
+\begin{itemize}
+    \item Arithmetic on large numbers reduces to parallel arithmetic on small numbers
+    \item Each component fits in a machine word (64-bit)
+    \item Operations can be parallelized across components
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{RNS Arithmetic}
+%------------------------------------------------------------------------------
+
+Addition, subtraction, and multiplication in RNS are component-wise:
+\begin{align}
+\text{RNS}(a + b) &= (\text{RNS}(a) + \text{RNS}(b)) \bmod \vec{q} \\
+\text{RNS}(a - b) &= (\text{RNS}(a) - \text{RNS}(b)) \bmod \vec{q} \\
+\text{RNS}(a \cdot b) &= (\text{RNS}(a) \cdot \text{RNS}(b)) \bmod \vec{q}
+\end{align}
+
+%==============================================================================
+\section{NTT-Friendly Prime Generation}
+%==============================================================================
+
+For NTT to work efficiently, we need primes $p$ satisfying:
+\[
+2N \mid (p - 1)
+\]
+This ensures primitive $2N$-th roots of unity exist in $\Z_p$.
+
+\begin{algorithm}[H]
+\caption{Generate NTT-Friendly Prime Chain}
+\begin{algorithmic}[1]
+\Function{GeneratePrimeChain}{$N$, count, bits}
+    \State primes $\gets []$
+    \State $k \gets (2^{\text{bits}} - 1) / (2N)$ \Comment{Start from largest candidate}
+    \While{$|\text{primes}| < \text{count}$ and $k > 0$}
+        \State candidate $\gets k \cdot 2N + 1$
+        \If{\Call{IsPrime}{candidate}}
+            \State primes.append(candidate)
+        \EndIf
+        \State $k \gets k - 1$
+    \EndWhile
+    \State \Return primes
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Form of NTT-friendly primes:} $p = k \cdot 2N + 1$ for some integer $k$.
+
+\textbf{Examples:}
+\begin{itemize}
+    \item For $N = 16$: primes of form $32k + 1$
+    \item $p = 97 = 3 \cdot 32 + 1$ ✓
+    \item $p = 193 = 6 \cdot 32 + 1$ ✓
+\end{itemize}
+
+%==============================================================================
+\section{CKKS Scheme Overview}
+%==============================================================================
+
+The CKKS scheme enables approximate arithmetic on encrypted complex numbers. Unlike exact schemes, CKKS accepts a small amount of approximation error in exchange for efficient operations on real-valued data.
+
+%------------------------------------------------------------------------------
+\subsection{Ring Structure}
+%------------------------------------------------------------------------------
+
+CKKS operates over the polynomial ring:
+\[
+R_Q = \Z_Q[X]/(X^N + 1)
+\]
+where $N$ is a power of 2 and $Q = \prod_{i=0}^{L} q_i$ is the ciphertext modulus.
+
+The ring $R_Q$ has the property that $X^N \equiv -1$, enabling \emph{negacyclic} polynomial multiplication.
+
+%------------------------------------------------------------------------------
+\subsection{Scaling Factor}
+%------------------------------------------------------------------------------
+
+The scaling factor $\Delta$ (delta) controls precision:
+\begin{itemize}
+    \item Messages are scaled by $\Delta$ before encoding: $m \mapsto \Delta \cdot m$
+    \item After decryption, we divide by $\Delta$ to recover the message
+    \item Typical choice: $\Delta = 2^{40}$ for approximately 40 bits of precision
+\end{itemize}
+
+%==============================================================================
+\section{CKKS Encoding and Decoding}
+%==============================================================================
+
+Encoding converts complex vectors into polynomials via the \emph{canonical embedding}.
+
+%------------------------------------------------------------------------------
+\subsection{Canonical Embedding}
+%------------------------------------------------------------------------------
+
+\begin{definition}[Canonical Embedding]
+For the ring $\Z[X]/(X^N + 1)$, the canonical embedding $\sigma: R \to \mathbb{C}^N$ evaluates a polynomial at the primitive $2N$-th roots of unity:
+\[
+\sigma(a) = (a(\zeta), a(\zeta^3), a(\zeta^5), \ldots, a(\zeta^{2N-1}))
+\]
+where $\zeta = e^{\pi i / N}$.
+\end{definition}
+
+\begin{remark}
+Only $N/2$ slots are independent because $a(\zeta^{2k+1})$ and $a(\zeta^{2(N-k-1)+1})$ are complex conjugates for real-coefficient polynomials.
+\end{remark}
+
+%------------------------------------------------------------------------------
+\subsection{Encoding Algorithm}
+%------------------------------------------------------------------------------
+
+\begin{algorithm}[H]
+\caption{CKKS Encoding}
+\begin{algorithmic}[1]
+\Function{Encode}{$\vec{z}, \Delta$}
+    \State \textbf{Input:} Complex vector $\vec{z} = (z_0, z_1, \ldots, z_{N/2-1})$, scale $\Delta$
+    \State \textbf{Output:} Plaintext polynomial $m(X) \in R_Q$
+    \State
+    \State \Comment{Expand to full embedding (add conjugates)}
+    \State $\vec{v} \gets (z_0, z_1, \ldots, z_{N/2-1}, \bar{z}_{N/2-1}, \ldots, \bar{z}_0)$
+    \State
+    \State \Comment{Apply inverse canonical embedding (special inverse FFT)}
+    \State $\vec{c} \gets \sigma^{-1}(\vec{v})$
+    \State
+    \State \Comment{Scale and round to integers}
+    \For{$i \gets 0$ to $N-1$}
+        \State $m_i \gets \lfloor \Delta \cdot \text{Re}(c_i) \rceil$
+    \EndFor
+    \State
+    \State \Return $m(X) = \sum_{i=0}^{N-1} m_i X^i$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+%------------------------------------------------------------------------------
+\subsection{Decoding Algorithm}
+%------------------------------------------------------------------------------
+
+\begin{algorithm}[H]
+\caption{CKKS Decoding}
+\begin{algorithmic}[1]
+\Function{Decode}{$m(X), \Delta$}
+    \State \textbf{Input:} Plaintext polynomial $m(X)$, scale $\Delta$
+    \State \textbf{Output:} Complex vector $\vec{z}$
+    \State
+    \State \Comment{Convert coefficients to floats}
+    \For{$i \gets 0$ to $N-1$}
+        \State $c_i \gets m_i / \Delta$
+    \EndFor
+    \State
+    \State \Comment{Apply canonical embedding (special FFT)}
+    \State $\vec{v} \gets \sigma((c_0, c_1, \ldots, c_{N-1}))$
+    \State
+    \State \Comment{Return first half (actual slots)}
+    \State \Return $(v_0, v_1, \ldots, v_{N/2-1})$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+%==============================================================================
+\section{CKKS Key Generation}
+%==============================================================================
+
+CKKS uses the Ring Learning With Errors (RLWE) problem for security.
+
+%------------------------------------------------------------------------------
+\subsection{Secret Key}
+%------------------------------------------------------------------------------
+
+\begin{algorithm}[H]
+\caption{Secret Key Generation}
+\begin{algorithmic}[1]
+\Function{GenSecretKey}{$N$, primes}
+    \State \textbf{Output:} Secret key $s \in R_Q$ with small coefficients
+    \State
+    \For{$i \gets 0$ to $N-1$}
+        \State $s_i \gets$ uniform random from $\{-1, 0, 1\}$ \Comment{Ternary distribution}
+    \EndFor
+    \State
+    \State \Comment{Create RNS representation}
+    \For{each prime $q_j$ in primes}
+        \State $s^{(j)} \gets (s_0 \bmod q_j, s_1 \bmod q_j, \ldots)$
+    \EndFor
+    \State \Return $s$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+%------------------------------------------------------------------------------
+\subsection{Public Key}
+%------------------------------------------------------------------------------
+
+\begin{algorithm}[H]
+\caption{Public Key Generation}
+\begin{algorithmic}[1]
+\Function{GenPublicKey}{$s$, primes}
+    \State \textbf{Input:} Secret key $s$
+    \State \textbf{Output:} Public key $(b, a)$ where $b = -a \cdot s + e$
+    \State
+    \For{each prime $q_j$}
+        \State $a^{(j)} \gets$ uniform random polynomial in $\Z_{q_j}[X]/(X^N+1)$
+        \State $e^{(j)} \gets$ error polynomial with small Gaussian coefficients
+        \State $b^{(j)} \gets -a^{(j)} \cdot s^{(j)} + e^{(j)} \pmod{q_j}$
+    \EndFor
+    \State \Return $(b, a)$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+The public key satisfies: $b + a \cdot s = e \approx 0$
+
+%==============================================================================
+\section{CKKS Encryption and Decryption}
+%==============================================================================
+
+%------------------------------------------------------------------------------
+\subsection{Encryption}
+%------------------------------------------------------------------------------
+
+Encryption uses the public key to hide the message in RLWE noise.
+
+\begin{algorithm}[H]
+\caption{CKKS Encryption}
+\begin{algorithmic}[1]
+\Function{Encrypt}{$m$, $(b, a)$}
+    \State \textbf{Input:} Plaintext $m$, public key $(b, a)$
+    \State \textbf{Output:} Ciphertext $(c_0, c_1)$
+    \State
+    \State $u \gets$ random polynomial with ternary coefficients
+    \State $e_0 \gets$ small error polynomial
+    \State $e_1 \gets$ small error polynomial
+    \State
+    \State $c_0 \gets b \cdot u + e_0 + m$
+    \State $c_1 \gets a \cdot u + e_1$
+    \State
+    \State \Return $(c_0, c_1)$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\begin{remark}[Correctness]
+After encryption:
+\begin{align*}
+c_0 + c_1 \cdot s &= (b \cdot u + e_0 + m) + (a \cdot u + e_1) \cdot s \\
+&= (b + a \cdot s) \cdot u + e_0 + e_1 \cdot s + m \\
+&= e \cdot u + e_0 + e_1 \cdot s + m \\
+&\approx m
+\end{align*}
+The error terms $e \cdot u + e_0 + e_1 \cdot s$ are small and constitute the encryption noise.
+\end{remark}
+
+%------------------------------------------------------------------------------
+\subsection{Decryption}
+%------------------------------------------------------------------------------
+
+\begin{algorithm}[H]
+\caption{CKKS Decryption}
+\begin{algorithmic}[1]
+\Function{Decrypt}{$(c_0, c_1)$, $s$}
+    \State \textbf{Input:} Ciphertext $(c_0, c_1)$, secret key $s$
+    \State \textbf{Output:} Plaintext $m$
+    \State
+    \State $m \gets c_0 + c_1 \cdot s$
+    \State \Return $m$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+%==============================================================================
+\section{Homomorphic Operations}
+%==============================================================================
+
+CKKS supports arithmetic operations on encrypted data without decryption.
+
+%------------------------------------------------------------------------------
+\subsection{Homomorphic Addition}
+%------------------------------------------------------------------------------
+
+Addition of two ciphertexts is component-wise:
+
+\begin{algorithm}[H]
+\caption{Homomorphic Addition}
+\begin{algorithmic}[1]
+\Function{Add}{$(c_0, c_1)$, $(c_0', c_1')$}
+    \State \textbf{Require:} Both ciphertexts have the same scale $\Delta$
+    \State \Return $(c_0 + c_0', c_1 + c_1')$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\begin{theorem}[Correctness of Addition]
+If $(c_0, c_1)$ encrypts $m$ and $(c_0', c_1')$ encrypts $m'$, then $(c_0 + c_0', c_1 + c_1')$ encrypts $m + m'$.
+\end{theorem}
+
+\begin{proof}
+\begin{align*}
+(c_0 + c_0') + (c_1 + c_1') \cdot s &= (c_0 + c_1 \cdot s) + (c_0' + c_1' \cdot s) \\
+&\approx m + m'
+\end{align*}
+\end{proof}
+
+%------------------------------------------------------------------------------
+\subsection{Homomorphic Subtraction}
+%------------------------------------------------------------------------------
+
+\begin{algorithm}[H]
+\caption{Homomorphic Subtraction}
+\begin{algorithmic}[1]
+\Function{Sub}{$(c_0, c_1)$, $(c_0', c_1')$}
+    \State \textbf{Require:} Both ciphertexts have the same scale $\Delta$
+    \State \Return $(c_0 - c_0', c_1 - c_1')$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+%------------------------------------------------------------------------------
+\subsection{Plaintext Addition}
+%------------------------------------------------------------------------------
+
+A plaintext can be added directly to a ciphertext:
+
+\begin{algorithm}[H]
+\caption{Plaintext Addition}
+\begin{algorithmic}[1]
+\Function{AddPlain}{$(c_0, c_1)$, $m$}
+    \State \textbf{Require:} Plaintext $m$ has the same scale as ciphertext
+    \State \Return $(c_0 + m, c_1)$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+%------------------------------------------------------------------------------
+\subsection{Scalar Multiplication (Integer)}
+%------------------------------------------------------------------------------
+
+Multiplying a ciphertext by an integer $k$ is straightforward:
+
+\begin{algorithm}[H]
+\caption{Integer Scalar Multiplication}
+\begin{algorithmic}[1]
+\Function{MultiplyInteger}{$(c_0, c_1)$, $k$}
+    \State \textbf{Input:} Ciphertext $(c_0, c_1)$ with scale $\Delta$, integer scalar $k$
+    \State \textbf{Output:} Ciphertext encrypting $k \cdot m$ with same scale $\Delta$
+    \State
+    \State \Comment{Handle negative scalars}
+    \If{$k < 0$}
+        \State $k_{\text{mod}} \gets q - |k| \bmod q$ \Comment{Convert to positive residue}
+    \Else
+        \State $k_{\text{mod}} \gets k \bmod q$
+    \EndIf
+    \State
+    \State $c_0' \gets k_{\text{mod}} \cdot c_0$
+    \State $c_1' \gets k_{\text{mod}} \cdot c_1$
+    \State
+    \State \Return $(c_0', c_1')$ with scale $\Delta$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\begin{theorem}[Correctness of Integer Multiplication]
+If $(c_0, c_1)$ encrypts $\Delta \cdot m$, then $(k \cdot c_0, k \cdot c_1)$ encrypts $\Delta \cdot (k \cdot m)$.
+\end{theorem}
+
+\begin{proof}
+\begin{align*}
+k \cdot c_0 + k \cdot c_1 \cdot s &= k \cdot (c_0 + c_1 \cdot s) \\
+&\approx k \cdot (\Delta \cdot m) \\
+&= \Delta \cdot (k \cdot m)
+\end{align*}
+\end{proof}
+
+%------------------------------------------------------------------------------
+\subsection{Scalar Multiplication (Floating-Point)}
+%------------------------------------------------------------------------------
+
+For floating-point scalar multiplication, we encode the scalar into the message space:
+
+\begin{algorithm}[H]
+\caption{Floating-Point Scalar Multiplication}
+\begin{algorithmic}[1]
+\Function{MultiplyScalar}{$(c_0, c_1)$, $\alpha$, $\Delta$}
+    \State \textbf{Input:} Ciphertext $(c_0, c_1)$ with scale $\Delta$, float scalar $\alpha$
+    \State \textbf{Output:} Ciphertext encrypting $\alpha \cdot m$ with scale $\Delta^2$
+    \State
+    \State \Comment{Scale the float to match message encoding}
+    \State $\alpha_{\text{scaled}} \gets \lfloor \alpha \cdot \Delta \rceil$
+    \State
+    \For{each RNS component $j$}
+        \State $\alpha_{\text{mod}}^{(j)} \gets \alpha_{\text{scaled}} \bmod q_j$
+        \State $c_0'^{(j)} \gets \alpha_{\text{mod}}^{(j)} \cdot c_0^{(j)}$
+        \State $c_1'^{(j)} \gets \alpha_{\text{mod}}^{(j)} \cdot c_1^{(j)}$
+    \EndFor
+    \State
+    \State \Return $(c_0', c_1')$ with scale $\Delta^2$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\begin{remark}
+After floating-point multiplication, the scale doubles to $\Delta^2$. In practice, a \emph{rescaling} operation is applied to reduce the scale back to $\Delta$, maintaining precision across multiple operations.
+\end{remark}
+
+%------------------------------------------------------------------------------
+\subsection{OpenFHE-Style Plaintext-Ciphertext Multiplication}
+%------------------------------------------------------------------------------
+
+Following the design of OpenFHE [\ref{openfhe}], we implement a proper pipeline for plaintext-ciphertext multiplication that correctly manages scale:
+
+\begin{enumerate}
+    \item \textbf{Encode at scale:} Encode the plaintext vector at the same scale $\Delta$ as the ciphertext
+    \item \textbf{Polynomial multiply:} Multiply ciphertext polynomials by plaintext polynomial (scale becomes $\Delta^2$)
+    \item \textbf{Modular reduce (rescale):} Drop the last RNS prime and divide by $\approx \Delta$ (scale returns to $\approx \Delta$)
+\end{enumerate}
+
+\begin{algorithm}[H]
+\caption{Encode at Specific Scale}
+\begin{algorithmic}[1]
+\Function{EncodeAtScale}{$\vec{z}, \Delta_{\text{target}}$}
+    \State \textbf{Input:} Complex vector $\vec{z}$, target scale $\Delta_{\text{target}}$
+    \State \textbf{Output:} Plaintext polynomial $m(X)$ with scale $\Delta_{\text{target}}$
+    \State
+    \State \Comment{Same encoding algorithm as standard encode}
+    \State $\vec{v} \gets (z_0, z_1, \ldots, z_{N/2-1}, \bar{z}_{N/2-1}, \ldots, \bar{z}_0)$
+    \State $\vec{c} \gets \sigma^{-1}(\vec{v})$ \Comment{Inverse canonical embedding}
+    \For{$i \gets 0$ to $N-1$}
+        \State $m_i \gets \lfloor \Delta_{\text{target}} \cdot \text{Re}(c_i) \rceil$
+    \EndFor
+    \State \Return $m(X)$ with scale $\Delta_{\text{target}}$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[H]
+\caption{Evaluate Plaintext Multiplication (EvalMultPlain)}
+\begin{algorithmic}[1]
+\Function{EvalMultPlain}{$(c_0, c_1), \vec{v}$}
+    \State \textbf{Input:} Ciphertext $(c_0, c_1)$ with scale $\Delta$, plaintext vector $\vec{v}$
+    \State \textbf{Output:} Ciphertext with scale $\Delta^2$
+    \State
+    \State \Comment{Step 1: Encode plaintext at ciphertext's scale}
+    \State $m \gets$ \Call{EncodeAtScale}{$\vec{v}, \Delta$}
+    \State
+    \State \Comment{Step 2: Polynomial multiplication in RNS}
+    \For{each RNS prime $q_j$}
+        \State $c_0'^{(j)} \gets c_0^{(j)} \cdot m^{(j)} \pmod{q_j}$
+        \State $c_1'^{(j)} \gets c_1^{(j)} \cdot m^{(j)} \pmod{q_j}$
+    \EndFor
+    \State
+    \State \Return $(c_0', c_1')$ with scale $\Delta \cdot \Delta = \Delta^2$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\subsubsection{RNS Rescaling (Modular Reduction)}
+
+The key insight for correct rescaling is that dividing by the last prime $q_L$ in RNS requires special handling.
+
+\begin{theorem}[RNS Division by Last Prime]
+Let $x$ be an integer with RNS representation $(x^{(0)}, x^{(1)}, \ldots, x^{(L)})$ where $x^{(i)} = x \bmod q_i$. To compute $\lfloor x / q_L \rfloor$ in the remaining RNS components:
+\[
+\left\lfloor \frac{x}{q_L} \right\rfloor \bmod q_i = (x^{(i)} - x^{(L)}) \cdot q_L^{-1} \bmod q_i
+\]
+for each $i < L$.
+\end{theorem}
+
+\begin{proof}
+From the definition of floor division:
+\[
+x = q_L \cdot \lfloor x / q_L \rfloor + (x \bmod q_L)
+\]
+Therefore:
+\[
+\lfloor x / q_L \rfloor = \frac{x - (x \bmod q_L)}{q_L}
+\]
+In modular arithmetic mod $q_i$:
+\[
+\lfloor x / q_L \rfloor \equiv (x - x^{(L)}) \cdot q_L^{-1} \pmod{q_i}
+\]
+where $x^{(L)} = x \bmod q_L$ is lifted to mod $q_i$.
+\end{proof}
+
+\begin{algorithm}[H]
+\caption{Modular Reduction (Rescale)}
+\begin{algorithmic}[1]
+\Function{ModReduce}{$(c_0, c_1)$, primes}
+    \State \textbf{Input:} Ciphertext with $L+1$ RNS components, scale $\Delta^2$
+    \State \textbf{Output:} Ciphertext with $L$ RNS components, scale $\approx \Delta$
+    \State \textbf{Require:} At least 2 RNS primes remaining
+    \State
+    \State $L \gets$ number of primes $- 1$
+    \State $q_L \gets$ primes$[L]$ \Comment{Last prime to drop}
+    \State
+    \State \Comment{Precompute modular inverses}
+    \For{$i \gets 0$ to $L - 1$}
+        \State $\text{inv}_i \gets q_L^{-1} \bmod q_i$
+    \EndFor
+    \State
+    \State \Comment{For each remaining RNS component}
+    \For{$i \gets 0$ to $L - 1$}
+        \For{each coefficient index $k$}
+            \State $x_L \gets c_0^{(L)}[k] \bmod q_i$ \Comment{Lift last residue}
+            \State $c_0'^{(i)}[k] \gets (c_0^{(i)}[k] - x_L) \cdot \text{inv}_i \bmod q_i$
+        \EndFor
+    \EndFor
+    \State \Comment{Same for $c_1$}
+    \State
+    \State $\Delta' \gets \Delta^2 / q_L$ \Comment{New scale $\approx \Delta$ when $q_L \approx \Delta$}
+    \State \Return $(c_0', c_1')$ with scale $\Delta'$ and $L$ primes
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\begin{remark}[Scale Management]
+For rescaling to restore the original scale, we need $q_L \approx \Delta$. This is achieved by choosing prime\_bits $\approx$ scale\_bits in the parameter generation. Specifically:
+\begin{itemize}
+    \item Before multiply: scale = $\Delta$
+    \item After multiply: scale = $\Delta^2$
+    \item After rescale by $q_L \approx \Delta$: scale = $\Delta^2 / q_L \approx \Delta$
+\end{itemize}
+\end{remark}
+
+\begin{algorithm}[H]
+\caption{Complete Multiply and Rescale Pipeline}
+\begin{algorithmic}[1]
+\Function{EvalMultAndRescale}{$(c_0, c_1), \vec{v}$}
+    \State \textbf{Input:} Ciphertext with scale $\Delta$, plaintext vector $\vec{v}$
+    \State \textbf{Output:} Ciphertext with scale $\approx \Delta$ (one level consumed)
+    \State
+    \State $(c_0', c_1') \gets$ \Call{EvalMultPlain}{$(c_0, c_1), \vec{v}$} \Comment{Scale: $\Delta^2$}
+    \State $(\tilde{c}_0, \tilde{c}_1) \gets$ \Call{ModReduce}{$(c_0', c_1')$} \Comment{Scale: $\approx \Delta$}
+    \State
+    \State \Return $(\tilde{c}_0, \tilde{c}_1)$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\begin{theorem}[Correctness of Multiply-Rescale]
+If $(c_0, c_1)$ encrypts $m$ at scale $\Delta$, and $\vec{v}$ is encoded at scale $\Delta$, then after \textsc{EvalMultAndRescale}:
+\[
+\text{Dec}(\tilde{c}_0, \tilde{c}_1) \approx m \odot \vec{v}
+\]
+where $\odot$ denotes element-wise (slot-wise) multiplication, with the result at scale $\approx \Delta$.
+\end{theorem}
+
+\subsubsection{Level-Preserving Alternative}
+
+For cases where level consumption is undesirable (e.g., toy parameters or deep circuits), we provide an alternative that uses a small scaling factor:
+
+\begin{algorithm}[H]
+\caption{Level-Preserving Slot Multiplication}
+\begin{algorithmic}[1]
+\Function{MultiplySlotsApprox}{$(c_0, c_1), \vec{v}$}
+    \State \textbf{Input:} Ciphertext, plaintext vector $\vec{v}$
+    \State \textbf{Output:} Ciphertext (same level, approximate)
+    \State
+    \State \Comment{Encode at small scale to avoid rescaling}
+    \State $\Delta_{\text{small}} \gets \sqrt{N}$ \Comment{FFT normalization factor}
+    \State $m \gets$ \Call{EncodeAtScale}{$\vec{v}, \Delta_{\text{small}}$}
+    \State
+    \State \Comment{Multiply polynomials}
+    \For{each RNS prime $q_j$}
+        \State $c_0'^{(j)} \gets c_0^{(j)} \cdot m^{(j)} \pmod{q_j}$
+        \State $c_1'^{(j)} \gets c_1^{(j)} \cdot m^{(j)} \pmod{q_j}$
+    \EndFor
+    \State
+    \State \Return $(c_0', c_1')$ with scale $\Delta \cdot \sqrt{N}$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\begin{remark}
+The level-preserving method trades precision for depth. It is useful when:
+\begin{itemize}
+    \item Testing with small (toy) parameters
+    \item Computing circuits that exceed the available level budget
+    \item Approximate results are acceptable
+\end{itemize}
+\end{remark}
+
+%------------------------------------------------------------------------------
+\subsection{Noise Growth}
+%------------------------------------------------------------------------------
+
+Each homomorphic operation increases the noise in the ciphertext:
+
+\begin{itemize}
+    \item \textbf{Addition:} Noise adds: $\|e_{\text{add}}\| \approx \|e_1\| + \|e_2\|$
+    \item \textbf{Scalar multiplication:} Noise scales: $\|e_{\text{mul}}\| \approx |k| \cdot \|e\|$
+    \item \textbf{Ciphertext multiplication:} Noise grows multiplicatively (requires relinearization)
+\end{itemize}
+
+The modulus chain $(q_0, q_1, \ldots, q_L)$ provides ``noise budget'' — after each multiplication, we can drop a prime via rescaling to reduce noise.
+
+%==============================================================================
+\section{Slot Rotations via Galois Automorphisms}
+%==============================================================================
+
+A powerful feature of CKKS is the ability to \emph{rotate} the ciphertext slots. This allows us to access and combine values at different positions within a single ciphertext, enabling parallel operations like inner products and convolutions on encrypted data.
+
+%------------------------------------------------------------------------------
+\subsection{Mathematical Background: Galois Automorphisms}
+%------------------------------------------------------------------------------
+
+\begin{definition}[Galois Automorphism]
+For the cyclotomic ring $R = \Z[X]/(X^N + 1)$ where $N$ is a power of 2, the \textbf{Galois automorphisms} are ring homomorphisms $\sigma_k: R \to R$ defined by:
+\[
+\sigma_k: X \mapsto X^k
+\]
+where $k$ is an odd integer coprime to $2N$, i.e., $\gcd(k, 2N) = 1$.
+\end{definition}
+
+\begin{theorem}[Effect on Polynomial]
+For a polynomial $a(X) = \sum_{i=0}^{N-1} a_i X^i$, the automorphism $\sigma_k$ gives:
+\[
+\sigma_k(a(X)) = a(X^k) = \sum_{i=0}^{N-1} a_i X^{ik} \pmod{X^N + 1}
+\]
+\end{theorem}
+
+\begin{remark}[Reduction Rule]
+When computing $X^{ik} \pmod{X^N + 1}$, we use the fact that $X^N \equiv -1$:
+\[
+X^j \equiv \begin{cases}
+X^j & \text{if } 0 \leq j < N \\
+-X^{j-N} & \text{if } N \leq j < 2N \\
+\vdots & \text{(pattern repeats)}
+\end{cases}
+\]
+\end{remark}
+
+\begin{algorithm}[H]
+\caption{Apply Automorphism to Polynomial}
+\begin{algorithmic}[1]
+\Function{ApplyAutomorphism}{$a(X), k, N, q$}
+    \State \textbf{Input:} Polynomial $a$ with coefficients $(a_0, \ldots, a_{N-1})$, Galois element $k$
+    \State \textbf{Output:} $\sigma_k(a) = a(X^k)$
+    \State
+    \State $b \gets [0, 0, \ldots, 0]$ \Comment{$N$ zeros}
+    \For{$i \gets 0$ to $N - 1$}
+        \If{$a_i = 0$} \textbf{continue} \EndIf
+        \State newExp $\gets (i \cdot k) \bmod 2N$
+        \If{newExp $< N$}
+            \State $b[\text{newExp}] \gets (b[\text{newExp}] + a_i) \bmod q$
+        \Else
+            \State $b[\text{newExp} - N] \gets (b[\text{newExp} - N] - a_i) \bmod q$ \Comment{$X^N = -1$}
+        \EndIf
+    \EndFor
+    \State \Return $b$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Complexity:} $O(N)$ for applying an automorphism to a polynomial.
+
+%------------------------------------------------------------------------------
+\subsection{Galois Elements for Slot Rotation}
+%------------------------------------------------------------------------------
+
+The connection between Galois automorphisms and slot rotations comes from the canonical embedding.
+
+\begin{definition}[Slot Permutation]
+The automorphism $\sigma_k$ induces a permutation on the $N/2$ slots. Specifically, if slot $j$ contains value $z_j$, then after applying $\sigma_k$:
+\[
+\text{slot}[j'] \gets z_j
+\]
+where $j'$ depends on $k$ and the ring structure.
+\end{definition}
+
+\begin{theorem}[Cyclic Rotation Generator]
+For the ring $\Z[X]/(X^N + 1)$ with $N = 2^d$, the element $5$ generates cyclic rotations of the slots:
+\begin{itemize}
+    \item Left rotation by $r$ positions: use Galois element $k = 5^r \bmod 2N$
+    \item Right rotation by $r$ positions: use Galois element $k = 5^{-r} \bmod 2N$
+\end{itemize}
+\end{theorem}
+
+\begin{proof}
+The proof has three parts: understanding the group structure, showing that $5$ generates the cyclic subgroup, and connecting this to slot rotations.
+
+\textbf{Part 1: Structure of $(\Z/2N\Z)^*$}
+
+The Galois group of the cyclotomic field $\Q(\zeta_{2N})$ is isomorphic to $(\Z/2N\Z)^*$, the multiplicative group of integers coprime to $2N$. For $N = 2^d$ (where $d \geq 2$), the modulus is $2N = 2^{d+1}$, and we have:
+\[
+(\Z/2^{d+1}\Z)^* \cong \Z_2 \times \Z_{2^{d-1}}
+\]
+This group has order $\phi(2^{d+1}) = 2^d = N$.
+
+\textbf{Part 2: The decomposition}
+
+The two factors correspond to:
+\begin{itemize}
+    \item $\Z_2$: Generated by $-1 \equiv 2N-1 \pmod{2N}$. This automorphism gives complex conjugation.
+    \item $\Z_{2^{d-1}} = \Z_{N/2}$: Generated by an element of order $N/2$. This gives the cyclic slot rotations.
+\end{itemize}
+
+\textbf{Part 3: Why $5$ is the generator of $\Z_{N/2}$}
+
+We need to show that $\text{ord}_{2N}(5) = N/2$, i.e., that $5$ has multiplicative order $N/2$ modulo $2N = 2^{d+1}$.
+
+\textbf{Claim:} For any $d \geq 2$, we have $\text{ord}_{2^{d+1}}(5) = 2^{d-1}$.
+
+\textit{Base case} ($d = 2$): We need $\text{ord}_{8}(5) = 2$.
+\begin{itemize}
+    \item $5^1 = 5 \not\equiv 1 \pmod 8$
+    \item $5^2 = 25 = 3 \cdot 8 + 1 \equiv 1 \pmod 8$ \checkmark
+\end{itemize}
+So $\text{ord}_8(5) = 2 = 2^{2-1}$.
+
+\textit{Inductive step}: Assume $\text{ord}_{2^{d+1}}(5) = 2^{d-1}$ for some $d \geq 2$. We show $\text{ord}_{2^{d+2}}(5) = 2^d$.
+
+By the inductive hypothesis, $5^{2^{d-1}} \equiv 1 \pmod{2^{d+1}}$, which means:
+\[
+5^{2^{d-1}} = 1 + k \cdot 2^{d+1}
+\]
+for some integer $k$. We can verify that $k$ is odd (this follows from a lifting argument using Hensel's lemma).
+
+Now compute the order modulo $2^{d+2}$:
+\[
+5^{2^{d-1}} = 1 + k \cdot 2^{d+1} \not\equiv 1 \pmod{2^{d+2}} \quad \text{(since $k$ is odd)}
+\]
+But:
+\[
+5^{2^d} = (5^{2^{d-1}})^2 = (1 + k \cdot 2^{d+1})^2 = 1 + 2k \cdot 2^{d+1} + k^2 \cdot 2^{2d+2}
+\]
+\[
+= 1 + k \cdot 2^{d+2} + k^2 \cdot 2^{2d+2} \equiv 1 \pmod{2^{d+2}}
+\]
+(since $2d + 2 \geq d + 2$ for $d \geq 0$).
+
+Therefore $\text{ord}_{2^{d+2}}(5) = 2^d = 2^{(d+1)-1}$, completing the induction.
+
+\textbf{Part 4: Connection to slot rotations}
+
+The CKKS encoding places $N/2$ values in the slots corresponding to primitive $2N$-th roots of unity $\zeta_{2N}^j$ for $j \in \{1, 3, 5, \ldots, 2N-1\}$ (odd indices). The automorphism $\sigma_k: \zeta_{2N} \mapsto \zeta_{2N}^k$ permutes these roots.
+
+Since $5$ has order $N/2$ in $(\Z/2N\Z)^*$, the powers $\{5^0, 5^1, 5^2, \ldots, 5^{N/2-1}\} \pmod{2N}$ form a complete set of representatives for cyclic rotations of the $N/2$ slots. Specifically:
+\begin{itemize}
+    \item $\sigma_{5^r}$ cyclically rotates slots left by $r$ positions
+    \item $\sigma_{5^{-r}} = \sigma_{5^{N/2-r}}$ rotates right by $r$ positions
+\end{itemize}
+
+This completes the proof that $5$ generates all cyclic slot rotations.
+\end{proof}
+
+\begin{remark}[Why specifically $5$?]
+The choice of $5$ is not unique---any odd integer $g$ with $g \equiv 5 \pmod 8$ would work (e.g., $5, 13, 21, \ldots$). The element $3$ does \emph{not} work because $3^2 = 9 \equiv 1 \pmod 8$, giving order only $2$ for $N = 4$. The number $5$ is simply the smallest positive generator.
+\end{remark}
+
+\begin{algorithm}[H]
+\caption{Compute Galois Element for Rotation}
+\begin{algorithmic}[1]
+\Function{RotationGaloisElement}{steps, $N$}
+    \State \textbf{Input:} Number of rotation steps (positive = left, negative = right)
+    \State \textbf{Output:} Galois element $k$
+    \State
+    \If{steps $= 0$}
+        \State \Return $1$ \Comment{Identity automorphism}
+    \EndIf
+    \State
+    \State $g \gets 5$ \Comment{Generator for rotations}
+    \State $m \gets 2N$
+    \State
+    \If{steps $> 0$}
+        \State \Return $g^{\text{steps}} \bmod m$
+    \Else
+        \State $|$steps$| \gets -$steps
+        \State $g^{|steps|} \gets g^{|steps|} \bmod m$
+        \State \Return $(g^{|steps|})^{-1} \bmod m$ \Comment{Modular inverse}
+    \EndIf
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Example for $N = 16$ (32 slots would need $N = 64$, but for $N/2 = 8$ slots):}
+\begin{center}
+\begin{tabular}{ccc}
+\toprule
+\textbf{Rotation} & \textbf{Computation} & \textbf{Galois Element $k$} \\
+\midrule
+Left by 1 & $5^1 \bmod 32$ & 5 \\
+Left by 2 & $5^2 \bmod 32$ & 25 \\
+Left by 3 & $5^3 \bmod 32$ & 29 \\
+Right by 1 & $5^{-1} \bmod 32$ & 13 \\
+Right by 2 & $5^{-2} \bmod 32$ & 9 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%------------------------------------------------------------------------------
+\subsection{Conjugation}
+%------------------------------------------------------------------------------
+
+A special Galois automorphism is conjugation, which computes the complex conjugate of all slot values.
+
+\begin{definition}[Conjugation Automorphism]
+The conjugation automorphism is $\sigma_{-1}: X \mapsto X^{-1} = X^{2N-1}$, i.e.:
+\[
+k_{\text{conj}} = 2N - 1
+\]
+\end{definition}
+
+After applying $\sigma_{2N-1}$, each slot value $z_j$ becomes $\bar{z}_j$ (complex conjugate).
+
+%------------------------------------------------------------------------------
+\subsection{The Key Switching Problem}
+%------------------------------------------------------------------------------
+
+There is a fundamental problem with applying automorphisms to ciphertexts.
+
+\begin{theorem}[Automorphism on Ciphertext]
+Let $(c_0, c_1)$ be a ciphertext encrypting message $m$ under secret key $s$, i.e.:
+\[
+c_0 + c_1 \cdot s \approx m
+\]
+After applying automorphism $\sigma_k$:
+\[
+\sigma_k(c_0) + \sigma_k(c_1) \cdot \sigma_k(s) \approx \sigma_k(m)
+\]
+\end{theorem}
+
+\begin{remark}[The Problem]
+The rotated ciphertext $(\sigma_k(c_0), \sigma_k(c_1))$ decrypts under $\sigma_k(s)$, \textbf{not} under the original secret key $s$! We need a mechanism to ``switch'' back to the original key.
+\end{remark}
+
+%------------------------------------------------------------------------------
+\subsection{Galois Keys}
+%------------------------------------------------------------------------------
+
+A \textbf{Galois key} is a special encryption of $\sigma_k(s)$ that allows key switching.
+
+\begin{definition}[Galois Key]
+For automorphism $\sigma_k$, the Galois key is a collection of RLWE encryptions of scaled versions of $\sigma_k(s)$ under the original secret key $s$.
+\end{definition}
+
+\subsubsection{Digit Decomposition}
+
+To control noise growth during key switching, we use \textbf{digit decomposition}.
+
+\begin{definition}[Base-$B$ Decomposition]
+For a polynomial $a(X)$ with coefficients in $\Z_q$, the base-$B$ decomposition represents each coefficient $a_i$ as:
+\[
+a_i = \sum_{d=0}^{D-1} a_i^{(d)} \cdot B^d
+\]
+where $a_i^{(d)} \in [0, B)$ are the ``digits'' and $D = \lceil \log_B q \rceil$.
+\end{definition}
+
+\begin{algorithm}[H]
+\caption{Polynomial Digit Decomposition}
+\begin{algorithmic}[1]
+\Function{DecomposePolynomial}{$a(X), B, D$}
+    \State \textbf{Input:} Polynomial $a$ with $N$ coefficients, base $B$, number of digits $D$
+    \State \textbf{Output:} List of $D$ polynomials, one per digit position
+    \State
+    \State digits $\gets$ list of $D$ empty polynomials
+    \For{$i \gets 0$ to $N - 1$}
+        \State $v \gets a_i$
+        \For{$d \gets 0$ to $D - 1$}
+            \State digits$[d]_i \gets v \bmod B$
+            \State $v \gets \lfloor v / B \rfloor$
+        \EndFor
+    \EndFor
+    \State \Return digits
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\subsubsection{Galois Key Structure}
+
+\begin{definition}[Galois Key with Decomposition]
+The Galois key for $\sigma_k$ consists of $D$ RLWE encryptions:
+\[
+\text{GK}_k = \{ (\text{gk}_0^{(d)}, \text{gk}_1^{(d)}) \}_{d=0}^{D-1}
+\]
+where for each digit $d$:
+\begin{align}
+\text{gk}_0^{(d)} &= -a^{(d)} \cdot s + e^{(d)} + B^d \cdot \sigma_k(s) \\
+\text{gk}_1^{(d)} &= a^{(d)}
+\end{align}
+with $a^{(d)}$ uniformly random and $e^{(d)}$ small error.
+\end{definition}
+
+\begin{algorithm}[H]
+\caption{Generate Galois Key}
+\begin{algorithmic}[1]
+\Function{GenerateGaloisKey}{$s, k, B, D$}
+    \State \textbf{Input:} Secret key $s$, Galois element $k$, base $B$, digits $D$
+    \State \textbf{Output:} Galois key $\text{GK}_k$
+    \State
+    \State $\sigma_k(s) \gets$ \Call{ApplyAutomorphism}{$s, k$}
+    \State GK $\gets []$
+    \State
+    \For{$d \gets 0$ to $D - 1$}
+        \State $a^{(d)} \gets$ random polynomial in $R_q$
+        \State $e^{(d)} \gets$ small error polynomial
+        \State scale $\gets B^d \bmod q$
+        \State
+        \State $\text{gk}_0^{(d)} \gets -a^{(d)} \cdot s + e^{(d)} + \text{scale} \cdot \sigma_k(s)$
+        \State $\text{gk}_1^{(d)} \gets a^{(d)}$
+        \State
+        \State GK.append$((\text{gk}_0^{(d)}, \text{gk}_1^{(d)}))$
+    \EndFor
+    \State \Return GK
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+%------------------------------------------------------------------------------
+\subsection{Key Switching Algorithm}
+%------------------------------------------------------------------------------
+
+Key switching transforms a ciphertext that decrypts under $\sigma_k(s)$ into one that decrypts under $s$.
+
+\begin{theorem}[Key Switching Correctness]
+Let $\text{ct}' = (\sigma_k(c_0), \sigma_k(c_1))$ be the automorphism-applied ciphertext. After key switching using $\text{GK}_k$, the result $(\tilde{c}_0, \tilde{c}_1)$ satisfies:
+\[
+\tilde{c}_0 + \tilde{c}_1 \cdot s \approx \sigma_k(c_0) + \sigma_k(c_1) \cdot \sigma_k(s) \approx \sigma_k(m)
+\]
+\end{theorem}
+
+\begin{algorithm}[H]
+\caption{Key Switching}
+\begin{algorithmic}[1]
+\Function{KeySwitch}{$c_1', \text{GK}_k, B, D$}
+    \State \textbf{Input:} Polynomial $c_1' = \sigma_k(c_1)$ to switch, Galois key $\text{GK}_k$
+    \State \textbf{Output:} Key switching terms $(d_0, d_1)$
+    \State
+    \State \Comment{Decompose $c_1'$ into base-$B$ digits}
+    \State digits $\gets$ \Call{DecomposePolynomial}{$c_1', B, D$}
+    \State
+    \State \Comment{Compute inner product with Galois key}
+    \State $d_0 \gets 0$
+    \State $d_1 \gets 0$
+    \For{$d \gets 0$ to $D - 1$}
+        \State $d_0 \gets d_0 + \text{digits}[d] \cdot \text{gk}_0^{(d)}$
+        \State $d_1 \gets d_1 + \text{digits}[d] \cdot \text{gk}_1^{(d)}$
+    \EndFor
+    \State
+    \State \Return $(d_0, d_1)$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\begin{proof}[Proof of Correctness]
+We show that key switching produces the correct result.
+
+Let the digit decomposition of $\sigma_k(c_1)$ be:
+\[
+\sigma_k(c_1) = \sum_{d=0}^{D-1} \sigma_k(c_1)^{(d)} \cdot B^d
+\]
+
+The key switching output is:
+\begin{align*}
+d_0 &= \sum_{d=0}^{D-1} \sigma_k(c_1)^{(d)} \cdot \text{gk}_0^{(d)} \\
+&= \sum_{d=0}^{D-1} \sigma_k(c_1)^{(d)} \cdot (-a^{(d)} \cdot s + e^{(d)} + B^d \cdot \sigma_k(s))
+\end{align*}
+
+\begin{align*}
+d_1 &= \sum_{d=0}^{D-1} \sigma_k(c_1)^{(d)} \cdot \text{gk}_1^{(d)} \\
+&= \sum_{d=0}^{D-1} \sigma_k(c_1)^{(d)} \cdot a^{(d)}
+\end{align*}
+
+Now compute $d_0 + d_1 \cdot s$:
+\begin{align*}
+d_0 + d_1 \cdot s &= \sum_{d} \sigma_k(c_1)^{(d)} \cdot (-a^{(d)} \cdot s + e^{(d)} + B^d \cdot \sigma_k(s)) + \sum_{d} \sigma_k(c_1)^{(d)} \cdot a^{(d)} \cdot s \\
+&= \sum_{d} \sigma_k(c_1)^{(d)} \cdot e^{(d)} + \sum_{d} \sigma_k(c_1)^{(d)} \cdot B^d \cdot \sigma_k(s) \\
+&= \underbrace{\sum_{d} \sigma_k(c_1)^{(d)} \cdot e^{(d)}}_{\text{small error}} + \underbrace{\left(\sum_{d} \sigma_k(c_1)^{(d)} \cdot B^d\right)}_{\sigma_k(c_1)} \cdot \sigma_k(s) \\
+&\approx \sigma_k(c_1) \cdot \sigma_k(s)
+\end{align*}
+
+The $-a^{(d)} \cdot s$ and $a^{(d)} \cdot s$ terms cancel out!
+\end{proof}
+
+%------------------------------------------------------------------------------
+\subsection{Complete Rotation Algorithm}
+%------------------------------------------------------------------------------
+
+\begin{algorithm}[H]
+\caption{Ciphertext Rotation}
+\begin{algorithmic}[1]
+\Function{Rotate}{$(c_0, c_1)$, steps, $\text{GK}$}
+    \State \textbf{Input:} Ciphertext $(c_0, c_1)$, rotation steps, Galois keys $\text{GK}$
+    \State \textbf{Output:} Rotated ciphertext $(\tilde{c}_0, \tilde{c}_1)$
+    \State
+    \If{steps $= 0$}
+        \State \Return $(c_0, c_1)$ \Comment{No rotation needed}
+    \EndIf
+    \State
+    \State \Comment{Step 1: Compute Galois element}
+    \State $k \gets$ \Call{RotationGaloisElement}{steps, $N$}
+    \State
+    \State \Comment{Step 2: Apply automorphism to both components}
+    \State $c_0' \gets \sigma_k(c_0) = $ \Call{ApplyAutomorphism}{$c_0, k$}
+    \State $c_1' \gets \sigma_k(c_1) = $ \Call{ApplyAutomorphism}{$c_1, k$}
+    \State
+    \State \Comment{Step 3: Key switch to decrypt under original $s$}
+    \State $(d_0, d_1) \gets$ \Call{KeySwitch}{$c_1', \text{GK}[k]$}
+    \State
+    \State \Comment{Step 4: Combine results}
+    \State $\tilde{c}_0 \gets c_0' + d_0$
+    \State $\tilde{c}_1 \gets d_1$
+    \State
+    \State \Return $(\tilde{c}_0, \tilde{c}_1)$
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\begin{theorem}[Rotation Correctness]
+If $(c_0, c_1)$ encrypts message $m = (m_0, m_1, \ldots, m_{N/2-1})$, then \Call{Rotate}{$(c_0, c_1)$, $r$, GK} encrypts:
+\[
+m' = (m_r, m_{r+1}, \ldots, m_{N/2-1}, m_0, \ldots, m_{r-1})
+\]
+(cyclically shifted left by $r$ positions).
+\end{theorem}
+
+%------------------------------------------------------------------------------
+\subsection{Noise Analysis}
+%------------------------------------------------------------------------------
+
+Key switching introduces additional noise. The choice of decomposition base $B$ trades off:
+
+\begin{itemize}
+    \item \textbf{Smaller $B$:} More digits $D = \lceil \log_B q \rceil$, larger Galois keys, but smaller noise
+    \item \textbf{Larger $B$:} Fewer digits, smaller keys, but larger noise per digit operation
+\end{itemize}
+
+\begin{theorem}[Key Switching Noise]
+With base-$B$ decomposition, the noise added by key switching is approximately:
+\[
+\|e_{\text{KS}}\| \approx D \cdot B \cdot \|e\| \cdot \sqrt{N}
+\]
+where $\|e\|$ is the noise in the Galois key components.
+\end{theorem}
+
+\textbf{Typical choice:} $B = 2^{10}$ to $2^{15}$ provides a good balance.
+
+%------------------------------------------------------------------------------
+\subsection{Rotation Round-Trip}
+%------------------------------------------------------------------------------
+
+An important property is that rotating forward and then backward returns to the original:
+
+\begin{theorem}[Rotation Inverse]
+For any rotation amount $r$:
+\[
+\text{Rotate}(\text{Rotate}(\text{ct}, r), -r) \approx \text{ct}
+\]
+up to accumulated noise from the two key switching operations.
+\end{theorem}
+
+%------------------------------------------------------------------------------
+\subsection{Applications of Rotation}
+%------------------------------------------------------------------------------
+
+Slot rotations enable powerful parallel operations:
+
+\subsubsection{Inner Product}
+To compute $\langle \vec{a}, \vec{b} \rangle = \sum_{i} a_i b_i$ on encrypted vectors:
+\begin{enumerate}
+    \item Multiply element-wise: $\text{ct}_{ab} = \text{ct}_a \cdot \text{ct}_b$
+    \item Rotate and add repeatedly to sum all slots
+\end{enumerate}
+
+\begin{algorithm}[H]
+\caption{Encrypted Inner Product (Sum All Slots)}
+\begin{algorithmic}[1]
+\Function{SumSlots}{ct, GK, $n$}
+    \State \Comment{$n$ = number of slots}
+    \State result $\gets$ ct
+    \State shift $\gets n / 2$
+    \While{shift $\geq 1$}
+        \State rotated $\gets$ \Call{Rotate}{result, shift, GK}
+        \State result $\gets$ result $+$ rotated
+        \State shift $\gets$ shift $/$ 2
+    \EndWhile
+    \State \Return result \Comment{All slots now contain the sum}
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\subsubsection{Matrix-Vector Multiplication}
+
+Matrix-vector multiplication is a fundamental operation in machine learning and scientific computing. Given a plaintext matrix $A \in \mathbb{R}^{n \times n}$ and an encrypted vector $\vec{x}$, we want to compute $\vec{y} = A\vec{x}$ homomorphically.
+
+\paragraph{Naive Row Packing Approach}
+
+The straightforward approach encodes each row of $A$ as a separate plaintext and computes:
+
+\begin{enumerate}
+    \item For each row $i$: encode row $A_i = (a_{i,0}, a_{i,1}, \ldots, a_{i,n-1})$
+    \item Compute element-wise product: $\text{ct}'_i = A_i \otimes \text{ct}_x$
+    \item Apply rotate-and-sum to get $y_i = \sum_j a_{i,j} x_j$ in all slots
+    \item Mask with one-hot vector to isolate slot $i$
+    \item Sum all masked results
+\end{enumerate}
+
+This requires $2n$ multiplications, $n \log_2(n)$ rotations, and has multiplicative depth 2.
+
+\paragraph{Halevi-Shoup Diagonal Method}
+
+A more efficient approach, introduced by Halevi and Shoup~[\ref{halevi2014algorithms}], packs matrix entries along \textbf{wrapping diagonals}. For an $n \times n$ matrix, we create $n$ plaintext vectors where diagonal $k$ contains:
+\[
+\text{diag}_k = (a_{0,k \bmod n}, a_{1,(k+1) \bmod n}, \ldots, a_{n-1,(k+n-1) \bmod n})
+\]
+
+More precisely, the $k$-th diagonal vector has its $j$-th entry equal to $a_{j, (j+k) \bmod n}$.
+
+\begin{definition}[Diagonal Extraction]
+For matrix $A \in \mathbb{R}^{n \times n}$ and diagonal index $k \in \{0, 1, \ldots, n-1\}$:
+\[
+\text{diag}(A, k)[j] = A[j][(j+k) \bmod n], \quad j = 0, 1, \ldots, n-1
+\]
+\end{definition}
+
+\begin{example}[Diagonal Packing for $n=4$]
+For matrix:
+\[
+A = \begin{pmatrix}
+a_{0,0} & a_{0,1} & a_{0,2} & a_{0,3} \\
+a_{1,0} & a_{1,1} & a_{1,2} & a_{1,3} \\
+a_{2,0} & a_{2,1} & a_{2,2} & a_{2,3} \\
+a_{3,0} & a_{3,1} & a_{3,2} & a_{3,3}
+\end{pmatrix}
+\]
+
+The diagonals are:
+\begin{align*}
+\text{diag}_0 &= (a_{0,0}, a_{1,1}, a_{2,2}, a_{3,3}) & \text{(main diagonal)} \\
+\text{diag}_1 &= (a_{0,1}, a_{1,2}, a_{2,3}, a_{3,0}) & \text{(superdiagonal, wrapping)} \\
+\text{diag}_2 &= (a_{0,2}, a_{1,3}, a_{2,0}, a_{3,1}) \\
+\text{diag}_3 &= (a_{0,3}, a_{1,0}, a_{2,1}, a_{3,2})
+\end{align*}
+\end{example}
+
+\paragraph{The Matrix-Vector Algorithm}
+
+The key insight is that:
+\[
+A\vec{x} = \sum_{k=0}^{n-1} \text{diag}_k \otimes \text{Rotate}(\vec{x}, k)
+\]
+
+where $\otimes$ denotes element-wise multiplication and $\text{Rotate}(\vec{x}, k)$ cyclically rotates $\vec{x}$ left by $k$ positions.
+
+\begin{theorem}[Halevi-Shoup Correctness]
+Let $\vec{y} = A\vec{x}$. Then:
+\[
+y_j = \sum_{k=0}^{n-1} \text{diag}_k[j] \cdot (\text{Rotate}(\vec{x}, k))[j] = \sum_{k=0}^{n-1} a_{j,(j+k) \bmod n} \cdot x_{(j+k) \bmod n}
+\]
+As $k$ ranges over $\{0, \ldots, n-1\}$, $(j+k) \bmod n$ covers all indices, giving:
+\[
+y_j = \sum_{m=0}^{n-1} a_{j,m} x_m
+\]
+\end{theorem}
+
+\begin{algorithm}[H]
+\caption{Halevi-Shoup Matrix-Vector Multiplication}
+\begin{algorithmic}[1]
+\Function{MatVecDiagonal}{$A$, $\text{ct}_x$, GK, $n$}
+    \State \Comment{$A$ is $n \times n$ plaintext matrix, $\text{ct}_x$ encrypts $\vec{x}$}
+    \For{$k = 0$ to $n-1$}
+        \State $\text{diag}_k \gets$ \Call{ExtractDiagonal}{$A$, $k$}
+        \Comment{$\text{diag}_k[j] = A[j][(j+k) \bmod n]$}
+    \EndFor
+    \State
+    \State \Comment{Compute product using rotations}
+    \State result $\gets \text{diag}_0 \otimes \text{ct}_x$
+    \For{$k = 1$ to $n-1$}
+        \State $\text{ct}_{\text{rot}} \gets$ \Call{Rotate}{$\text{ct}_x$, $k$, GK}
+        \State result $\gets$ result $+$ $(\text{diag}_k \otimes \text{ct}_{\text{rot}})$
+    \EndFor
+    \State \Return result
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\paragraph{Complexity Comparison}
+
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Method} & \textbf{Multiplications} & \textbf{Rotations} & \textbf{Mult. Depth} \\
+\midrule
+Naive Row Packing & $2n$ & $n \log_2 n$ & 2 \\
+Halevi-Shoup Diagonal & $n$ & $n-1$ & 1 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The diagonal method achieves:
+\begin{itemize}
+    \item \textbf{Half the multiplications}: $n$ instead of $2n$
+    \item \textbf{Fewer rotations}: $n-1$ instead of $n \log_2 n$ (for $n > 4$)
+    \item \textbf{Lower depth}: 1 instead of 2, allowing more sequential operations
+\end{itemize}
+
+\paragraph{Implementation Notes}
+
+\begin{enumerate}
+    \item \textbf{Hoisting optimization}: Since all rotations are applied to the same ciphertext $\text{ct}_x$, the inverse NTT can be computed once and reused, further improving performance~[\ref{juvekar2018gazelle}].
+    
+    \item \textbf{Non-square matrices}: For $n \times m$ matrices with $n < m$, the ``squat diagonal'' method wraps both horizontally and vertically, packing more efficiently with only $n$ ciphertexts.
+    
+    \item \textbf{Plaintext encoding}: Each diagonal is encoded as a plaintext polynomial and multiplied with the rotated ciphertext. The scale management follows standard CKKS rules.
+\end{enumerate}
+
+\subsubsection{Convolutions via Toeplitz Matrices}
+
+Convolution is a fundamental operation in signal processing and deep learning. In CKKS, we can implement convolution efficiently by expressing it as a \textbf{Toeplitz matrix-vector multiplication}, leveraging the diagonal method described above.
+
+\paragraph{1D Convolution Definition}
+
+Given an input signal $\vec{x} = (x_0, x_1, \ldots, x_{n-1})$ and a kernel $\vec{k} = (k_0, k_1, \ldots, k_{m-1})$, the 1D convolution (valid mode) produces output $\vec{y}$ of length $n - m + 1$:
+\[
+y_i = \sum_{j=0}^{m-1} k_j \cdot x_{i+j}, \quad i = 0, 1, \ldots, n - m - 1
+\]
+
+\paragraph{Toeplitz Matrix Formulation}
+
+Convolution can be expressed as multiplication by a \textbf{Toeplitz matrix}—a matrix where each descending diagonal contains the same value.
+
+\begin{definition}[Toeplitz Matrix]
+A matrix $T \in \mathbb{R}^{p \times q}$ is Toeplitz if $T_{i,j} = T_{i+1,j+1}$ for all valid indices. Equivalently, $T_{i,j} = t_{i-j}$ for some sequence $(t_{-(q-1)}, \ldots, t_0, \ldots, t_{p-1})$.
+\end{definition}
+
+For convolution with kernel $\vec{k} = (k_0, k_1, \ldots, k_{m-1})$, we construct:
+\[
+T_{\text{conv}} = \begin{pmatrix}
+k_0 & k_1 & k_2 & \cdots & k_{m-1} & 0 & \cdots & 0 \\
+0 & k_0 & k_1 & \cdots & k_{m-2} & k_{m-1} & \cdots & 0 \\
+\vdots & \ddots & \ddots & \ddots & & \ddots & \ddots & \vdots \\
+0 & \cdots & 0 & k_0 & k_1 & \cdots & k_{m-2} & k_{m-1}
+\end{pmatrix}
+\]
+
+This is a $(n - m + 1) \times n$ matrix. Then $\vec{y} = T_{\text{conv}} \cdot \vec{x}$.
+
+\begin{example}[Convolution as Toeplitz Product]
+For $\vec{x} = (x_0, x_1, x_2, x_3, x_4)$ and kernel $\vec{k} = (k_0, k_1, k_2)$:
+\[
+\begin{pmatrix}
+y_0 \\ y_1 \\ y_2
+\end{pmatrix}
+=
+\begin{pmatrix}
+k_0 & k_1 & k_2 & 0 & 0 \\
+0 & k_0 & k_1 & k_2 & 0 \\
+0 & 0 & k_0 & k_1 & k_2
+\end{pmatrix}
+\begin{pmatrix}
+x_0 \\ x_1 \\ x_2 \\ x_3 \\ x_4
+\end{pmatrix}
+\]
+\end{example}
+
+\paragraph{Exploiting Toeplitz Sparsity with Diagonal Packing}
+
+A key observation is that Toeplitz matrices have at most $m$ \emph{distinct} diagonals (where $m$ is the kernel size), and most diagonals are zero. Using the Halevi-Shoup diagonal method, we need only $m$ rotations instead of $n$ rotations.
+
+\begin{theorem}[Toeplitz Diagonal Structure]
+For a Toeplitz convolution matrix $T_{\text{conv}}$ with kernel of size $m$, only diagonals $0, 1, \ldots, m-1$ are non-zero. The $k$-th diagonal contains the constant value $k_k$.
+\end{theorem}
+
+Applying the diagonal formula $A\vec{x} = \sum_k \text{diag}_k \otimes \text{Rotate}(\vec{x}, k)$:
+\[
+T_{\text{conv}} \vec{x} = \sum_{k=0}^{m-1} k_k \cdot \text{Rotate}(\vec{x}, k)
+\]
+
+where each diagonal vector $\text{diag}_k$ is constant (filled with $k_k$), and we use scalar-ciphertext multiplication instead of plaintext-ciphertext multiplication.
+
+\begin{algorithm}[H]
+\caption{1D Convolution via Diagonal Method}
+\begin{algorithmic}[1]
+\Function{Conv1D}{$\vec{k}$, $\text{ct}_x$, GK}
+    \State \Comment{$\vec{k}$ is plaintext kernel of length $m$, $\text{ct}_x$ encrypts data}
+    \State result $\gets k_0 \cdot \text{ct}_x$ \Comment{Rotation by 0 is identity}
+    \For{$i = 1$ to $m-1$}
+        \State $\text{ct}_{\text{rot}} \gets$ \Call{Rotate}{$\text{ct}_x$, $i$, GK}
+        \State result $\gets$ result $+ k_i \cdot \text{ct}_{\text{rot}}$
+    \EndFor
+    \State \Return result
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\paragraph{Complexity:} $m-1$ rotations and $m$ scalar multiplications—independent of input length $n$.
+
+%------------------------------------------------------------------------------
+\subsection{Rotation Networks for Optimal Rotation Schedules}
+%------------------------------------------------------------------------------
+
+When multiple rotations are needed (as in convolution or matrix multiplication), we can optimize by \textbf{precomputing rotation networks}—directed acyclic graphs (DAGs) where intermediate rotated ciphertexts are reused.
+
+\begin{definition}[Rotation Network]
+A rotation network is a DAG $G = (V, E)$ where:
+\begin{itemize}
+    \item The source node represents the original ciphertext $\text{ct}$
+    \item Each edge $(u, v)$ labeled with $r$ represents applying rotation by $r$: $v = \text{Rotate}(u, r)$
+    \item Sink nodes represent the final required rotations
+\end{itemize}
+The goal is to minimize the total number of edges (rotation operations).
+\end{definition}
+
+\subsubsection{The Addition Chain Problem}
+
+Finding the optimal rotation network is equivalent to the \textbf{addition chain problem}: given a set of target rotation amounts $S = \{r_1, r_2, \ldots, r_k\}$, find the shortest sequence of additions (rotations) starting from 1 (identity) that produces all values in $S$.
+
+\begin{example}[Rotation Network for Powers of 2]
+To compute rotations by $\{1, 2, 4, 8, 16\}$:
+\begin{itemize}
+    \item \textbf{Naive:} 5 separate rotations from original
+    \item \textbf{Power-chain:} $\text{ct} \to \text{rot}_1 \to \text{rot}_2 \to \text{rot}_4 \to \text{rot}_8 \to \text{rot}_{16}$ (4 rotations, each doubles)
+\end{itemize}
+
+\begin{center}
+\begin{tikzpicture}[scale=0.8]
+% This is pseudocode for TikZ; actual rendering requires tikz package
+\end{tikzpicture}
+\end{center}
+
+The power-chain saves one rotation and generalizes to $\log_2(n)$ rotations for powers of 2.
+\end{example}
+
+\subsubsection{Rotation Hoisting}
+
+A major optimization called \textbf{hoisting} (introduced in GAZELLE~[\ref{juvekar2018gazelle}]) computes the expensive parts of key switching once and reuses them.
+
+\begin{theorem}[Hoisting Principle]
+For a ciphertext $\text{ct} = (c_0, c_1)$, the rotation operation:
+\[
+\text{Rotate}(\text{ct}, r) = (\sigma_{g^r}(c_0), \sigma_{g^r}(c_1)) + \text{KeySwitch}(\sigma_{g^r}(c_1), \text{GK}_{g^r})
+\]
+can be decomposed into:
+\begin{enumerate}
+    \item \textbf{Hoisted pre-computation} (done once): Compute $\text{INTT}(c_1)$ and digit-decompose
+    \item \textbf{Per-rotation computation}: Apply automorphism and key-switch using precomputed decomposition
+\end{enumerate}
+\end{theorem}
+
+\begin{definition}[Hoisting Structure]
+The hoisted representation of $c_1$ is:
+\[
+\text{Hoisted}(c_1) = \{ \text{digits}^{(d)} = \text{Decompose}(\text{INTT}(c_1)) \}_{d=0}^{D-1}
+\]
+For each rotation by $r$, the key switching becomes:
+\[
+d_i = \sum_{d} \sigma_{g^r}(\text{digits}^{(d)}) \cdot \text{gk}_i^{(d)}[g^r]
+\]
+\end{definition}
+
+\begin{algorithm}[H]
+\caption{Hoisted Multi-Rotation}
+\begin{algorithmic}[1]
+\Function{HoistedRotate}{$\text{ct}$, rotations, GK}
+    \State \Comment{rotations = list of rotation amounts}
+    \State $(c_0, c_1) \gets \text{ct}$
+    \State
+    \State \Comment{Step 1: Hoist (compute once)}
+    \State $c_1^{\text{coeff}} \gets$ \Call{INTT}{$c_1$}
+    \State hoisted $\gets$ \Call{DecomposePolynomial}{$c_1^{\text{coeff}}$, $B$, $D$}
+    \State
+    \State \Comment{Step 2: Apply each rotation}
+    \State results $\gets []$
+    \For{$r$ \textbf{in} rotations}
+        \State $k \gets 5^r \bmod 2N$
+        \State $c_0' \gets \sigma_k(c_0)$
+        \State
+        \State \Comment{Key switch using hoisted decomposition}
+        \State $d_0, d_1 \gets 0, 0$
+        \For{$d = 0$ to $D - 1$}
+            \State $\text{digit}' \gets \sigma_k(\text{hoisted}[d])$
+            \State $d_0 \gets d_0 + \text{digit}' \cdot \text{gk}_0^{(d)}[k]$
+            \State $d_1 \gets d_1 + \text{digit}' \cdot \text{gk}_1^{(d)}[k]$
+        \EndFor
+        \State
+        \State results.append$(c_0' + d_0, d_1)$
+    \EndFor
+    \State \Return results
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\paragraph{Complexity Improvement:}
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Method} & \textbf{$k$ Rotations Cost} & \textbf{Savings} \\
+\midrule
+Standard Rotation & $k \cdot (1 \text{ INTT} + D \text{ NTT mults})$ & — \\
+Hoisted Rotation & $1 \text{ INTT} + k \cdot D \text{ NTT mults}$ & $(k-1)$ INTTs \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+For convolution with kernel size $m$, hoisting saves $m - 1$ INTT operations.
+
+\subsubsection{Baby-Step Giant-Step (BSGS) Rotation}
+
+For large rotation sets, the \textbf{baby-step giant-step} method reduces the number of rotation keys needed while minimizing total rotations.
+
+\begin{theorem}[BSGS for Rotations]
+To compute all rotations $\{0, 1, \ldots, n-1\}$, set $t = \lceil \sqrt{n} \rceil$ and decompose each rotation $r$ as:
+\[
+r = i \cdot t + j \quad \text{where } i = \lfloor r/t \rfloor, j = r \bmod t
+\]
+Then:
+\[
+\text{Rotate}(\text{ct}, r) = \text{Rotate}(\text{Rotate}(\text{ct}, j), i \cdot t)
+\]
+\end{theorem}
+
+\begin{itemize}
+    \item \textbf{Baby steps:} Compute rotations $\{0, 1, \ldots, t-1\}$ from original — requires $t$ rotations
+    \item \textbf{Giant steps:} From each baby-step result, apply giant rotations $\{0, t, 2t, \ldots\}$
+\end{itemize}
+
+\paragraph{Key Storage:} Only $2\sqrt{n}$ Galois keys needed instead of $n$ keys.
+
+\begin{algorithm}[H]
+\caption{BSGS Matrix-Vector Multiplication}
+\begin{algorithmic}[1]
+\Function{MatVecBSGS}{$A$, $\text{ct}_x$, GK, $n$}
+    \State $t \gets \lceil \sqrt{n} \rceil$
+    \State
+    \State \Comment{Baby steps: rotate by 0, 1, ..., t-1}
+    \State babySteps $\gets [\text{ct}_x]$
+    \For{$j = 1$ to $t - 1$}
+        \State babySteps.append(\Call{Rotate}{$\text{ct}_x$, $j$, GK})
+    \EndFor
+    \State
+    \State \Comment{Giant steps and accumulation}
+    \State result $\gets 0$
+    \For{$i = 0$ to $\lceil n/t \rceil - 1$}
+        \State innerSum $\gets 0$
+        \For{$j = 0$ to $t - 1$}
+            \State $k \gets i \cdot t + j$
+            \If{$k < n$}
+                \State $\text{diag}_k \gets$ \Call{ExtractDiagonal}{$A$, $k$}
+                \State innerSum $\gets$ innerSum $+$ $\text{diag}_k \otimes$ babySteps$[j]$
+            \EndIf
+        \EndFor
+        \If{$i > 0$}
+            \State innerSum $\gets$ \Call{Rotate}{innerSum, $i \cdot t$, GK}
+        \EndIf
+        \State result $\gets$ result $+$ innerSum
+    \EndFor
+    \State \Return result
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\paragraph{Complexity Comparison for $n \times n$ Matrix-Vector:}
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Method} & \textbf{Rotations} & \textbf{Keys} & \textbf{Depth} \\
+\midrule
+Naive diagonal & $n - 1$ & $n - 1$ & 1 \\
+BSGS & $2\sqrt{n} - 2$ & $2\sqrt{n} - 2$ & 1 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%------------------------------------------------------------------------------
+\subsection{Mathematical Structure Optimizations for Rotations}
+%------------------------------------------------------------------------------
+
+Beyond algorithmic techniques like hoisting and BSGS, deeper mathematical structures in the cyclotomic ring enable further rotation optimizations. This section explores these algebraic insights.
+
+\subsubsection{Exploiting the Galois Group Decomposition}
+
+Recall that the Galois group of $\Q(\zeta_{2N})/\Q$ is:
+\[
+\text{Gal}(\Q(\zeta_{2N})/\Q) \cong (\Z/2N\Z)^* \cong \Z_2 \times \Z_{N/2}
+\]
+
+\begin{theorem}[Rotation-Conjugation Independence]
+For any rotation amount $r$ and the conjugation automorphism:
+\[
+\sigma_{-1} \circ \sigma_{5^r} = \sigma_{-5^r} = \sigma_{5^r} \circ \sigma_{-1}
+\]
+That is, conjugation and rotations \textbf{commute}.
+\end{theorem}
+
+\begin{proof}
+Since $-1$ generates $\Z_2$ and $5$ generates $\Z_{N/2}$ in the direct product, and elements from different direct factors commute:
+\[
+(-1) \cdot 5^r \equiv 5^r \cdot (-1) \pmod{2N}
+\]
+The automorphisms inherit this commutativity.
+\end{proof}
+
+\begin{remark}[Practical Implication]
+When computing operations that require both rotation and conjugation (e.g., real-part extraction), the order of operations is irrelevant. This allows batching conjugation with other operations.
+\end{remark}
+
+\subsubsection{Binary Decomposition of Rotations}
+
+Any rotation $r \in \{0, 1, \ldots, N/2 - 1\}$ can be expressed in binary:
+\[
+r = \sum_{i=0}^{\log_2(N/2)-1} b_i \cdot 2^i, \quad b_i \in \{0, 1\}
+\]
+
+\begin{theorem}[Logarithmic Rotation Composition]
+Using only $\log_2(N/2)$ rotation keys for powers of 2, any rotation can be computed as:
+\[
+\sigma_{5^r} = \sigma_{5^{b_0 \cdot 1}} \circ \sigma_{5^{b_1 \cdot 2}} \circ \cdots \circ \sigma_{5^{b_k \cdot 2^k}}
+\]
+where only terms with $b_i = 1$ contribute.
+\end{theorem}
+
+\begin{algorithm}[H]
+\caption{Binary Rotation Decomposition}
+\begin{algorithmic}[1]
+\Function{RotateBinary}{$\text{ct}$, $r$, GK}
+    \State result $\gets$ ct
+    \State power $\gets 1$
+    \While{$r > 0$}
+        \If{$r \land 1 = 1$}
+            \State result $\gets$ \Call{Rotate}{result, power, GK}
+        \EndIf
+        \State power $\gets$ power $\times 2$
+        \State $r \gets r \gg 1$
+    \EndWhile
+    \State \Return result
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\paragraph{Trade-offs:}
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Approach} & \textbf{Keys Stored} & \textbf{Rotations per Query} \\
+\midrule
+All keys & $N/2 - 1$ & $1$ \\
+Power-of-2 keys only & $\log_2(N/2)$ & $O(\log r)$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{The Evaluation-Interpolation Perspective}
+
+CKKS encoding maps values to \emph{evaluation points} at primitive $2N$-th roots of unity. Rotations correspond to permutations of these evaluation points.
+
+\begin{definition}[Slot Embedding]
+Let $\omega = e^{i\pi/N}$ be a primitive $2N$-th root of unity. The slots correspond to evaluations at odd powers:
+\[
+\text{Slots} \leftrightarrow \{ \omega^1, \omega^3, \omega^5, \ldots, \omega^{2N-1} \}
+\]
+\end{definition}
+
+\begin{theorem}[Rotation as Root Permutation]
+The automorphism $\sigma_{5^r}$ maps $\omega \mapsto \omega^{5^r}$, inducing the permutation:
+\[
+\omega^{2j+1} \mapsto \omega^{(2j+1) \cdot 5^r \bmod 2N}
+\]
+on the slot roots. This permutation is exactly the cyclic shift by $r$ positions.
+\end{theorem}
+
+\begin{proof}
+The map $j \mapsto j \cdot 5^r \bmod (N/2)$ on slot indices is a cyclic rotation because $5$ has order $N/2$ in $(\Z/2N\Z)^*$.
+\end{proof}
+
+\begin{remark}[NTT Connection]
+In the NTT domain, ciphertext coefficients are evaluations at $N$-th roots of unity, \emph{not} $2N$-th roots. The automorphism $\sigma_k$ permutes NTT coefficients according to the map $i \mapsto (k \cdot i) \bmod N$. When $k = 5^r$, this induces a specific permutation pattern that can be computed without full coefficient transformation.
+\end{remark}
+
+\subsubsection{Frobenius Eigenspaces}
+
+In characteristic $p$ extensions, the Frobenius map $x \mapsto x^p$ defines important eigenspaces. While CKKS works over $\Q$, an analogous structure exists.
+
+\begin{definition}[Conjugation Eigenspaces]
+Under the conjugation automorphism $\sigma_{-1}$:
+\begin{itemize}
+    \item \textbf{Real eigenspace} ($+1$ eigenvalue): elements invariant under $\sigma_{-1}$
+    \item \textbf{Imaginary eigenspace} ($-1$ eigenvalue): elements negated by $\sigma_{-1}$
+\end{itemize}
+\end{definition}
+
+\begin{theorem}[Real/Imaginary Decomposition]
+Any ciphertext $\text{ct}$ can be decomposed:
+\[
+\text{ct} = \text{ct}_{\text{real}} + \text{ct}_{\text{imag}}
+\]
+where:
+\[
+\text{ct}_{\text{real}} = \frac{1}{2}(\text{ct} + \sigma_{-1}(\text{ct})), \quad \text{ct}_{\text{imag}} = \frac{1}{2}(\text{ct} - \sigma_{-1}(\text{ct}))
+\]
+\end{theorem}
+
+\begin{remark}[Rotation Preservation]
+The real and imaginary eigenspaces are \textbf{preserved} under rotations:
+\[
+\sigma_{5^r}(\text{ct}_{\text{real}}) = (\sigma_{5^r}(\text{ct}))_{\text{real}}
+\]
+This follows from the commutativity of rotations and conjugation.
+\end{remark}
+
+\subsubsection{Automorphism Key Compression via Orbit Structure}
+
+The orbits of slot indices under rotation form a mathematical structure that enables key compression.
+
+\begin{definition}[Rotation Orbit]
+For slot index $j$, the orbit under rotation is:
+\[
+\mathcal{O}(j) = \{ (j + r) \bmod (N/2) : r \in \Z \} = \Z_{N/2}
+\]
+Since $5$ generates all rotations, every slot is in the same orbit.
+\end{definition}
+
+\begin{theorem}[Orbit Transitivity]
+The rotation group acts \textbf{transitively} on slots: for any two slot indices $i, j$, there exists a rotation $\sigma_{5^r}$ such that slot $i$ maps to slot $j$.
+\end{theorem}
+
+\begin{corollary}[Algorithm Design Implication]
+Since all slots are equivalent under rotation, algorithms can assume data starts at slot 0 without loss of generality. Initial alignment can always be achieved with a single rotation.
+\end{corollary}
+
+\subsubsection{Chinese Remainder Theorem Decomposition}
+
+The RNS representation enables CRT-based rotation optimization.
+
+\begin{theorem}[CRT-Decomposed Rotation]
+For a ciphertext in RNS form with moduli $\{q_1, q_2, \ldots, q_L\}$, the automorphism $\sigma_k$ can be applied independently to each CRT component:
+\[
+\sigma_k(\text{ct}) = (\sigma_k(\text{ct}^{(1)}), \sigma_k(\text{ct}^{(2)}), \ldots, \sigma_k(\text{ct}^{(L)}))
+\]
+All $L$ applications are independent and can be parallelized.
+\end{theorem}
+
+\begin{remark}[Implementation Note]
+In our Rust implementation, this CRT independence is exploited by applying automorphisms component-wise across the RNS tower without cross-component communication.
+\end{remark}
+
+\subsubsection{Minimal Rotation Key Sets}
+
+\begin{definition}[Rotation Generator Set]
+A set $S \subseteq \{1, 2, \ldots, N/2 - 1\}$ is a \textbf{rotation generator set} if the subgroup generated by $\{5^s : s \in S\}$ contains all rotation automorphisms.
+\end{definition}
+
+\begin{theorem}[Minimal Generator]
+The minimal rotation generator set is $\{1\}$, since $\sigma_5$ generates all rotations. However, using only one key requires sequential composition.
+\end{theorem}
+
+For practical trade-offs, consider:
+
+\begin{center}
+\begin{tabular}{lccl}
+\toprule
+\textbf{Generator Set} & \textbf{Keys} & \textbf{Max Compositions} & \textbf{Use Case} \\
+\midrule
+$\{1\}$ & 1 & $N/2 - 1$ & Minimal storage \\
+$\{1, 2, 4, \ldots, N/4\}$ & $\log_2(N/2)$ & $\log_2(N/2)$ & Balanced \\
+$\{1, 2, \ldots, \sqrt{N/2}\}$ & $\sqrt{N/2}$ & 2 & BSGS \\
+$\{1, 2, \ldots, N/2-1\}$ & $N/2 - 1$ & 1 & Maximum speed \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{Circulant Matrix Eigenstructure}
+
+The rotation operator can be viewed as a \textbf{circulant matrix} acting on slot vectors.
+
+\begin{definition}[Rotation Matrix]
+Left rotation by 1 corresponds to the $n \times n$ permutation matrix ($n = N/2$):
+\[
+R = \begin{pmatrix}
+0 & 1 & 0 & \cdots & 0 \\
+0 & 0 & 1 & \cdots & 0 \\
+\vdots & & \ddots & \ddots & \vdots \\
+0 & 0 & \cdots & 0 & 1 \\
+1 & 0 & \cdots & 0 & 0
+\end{pmatrix}
+\]
+\end{definition}
+
+\begin{theorem}[Circulant Eigendecomposition]
+$R$ has eigenvalues $\omega_n^j = e^{2\pi i j/n}$ for $j = 0, 1, \ldots, n-1$, with eigenvectors:
+\[
+v_j = \frac{1}{\sqrt{n}}(1, \omega_n^j, \omega_n^{2j}, \ldots, \omega_n^{(n-1)j})
+\]
+The DFT matrix $F$ diagonalizes $R$: $R = F^{-1} \Lambda F$ where $\Lambda = \text{diag}(\omega_n^0, \ldots, \omega_n^{n-1})$.
+\end{theorem}
+
+\begin{remark}[Fourier Domain Rotation]
+In the Fourier (DFT) domain of slot values, rotation by $r$ becomes element-wise multiplication by $(\omega_n^0, \omega_n^r, \omega_n^{2r}, \ldots)$. This is analogous to how convolution becomes multiplication in Fourier space.
+
+This insight suggests that for some algorithms, transforming to slot-Fourier space, applying rotations as multiplications, and transforming back might be advantageous—though the transformation itself is expensive.
+\end{remark}
+
+\subsubsection{Subfield Structure and Tower Decomposition}
+
+For $N = 2^d$, the cyclotomic field has a tower of subfields:
+\[
+\Q \subset \Q(\zeta_4) \subset \Q(\zeta_8) \subset \cdots \subset \Q(\zeta_{2N})
+\]
+
+\begin{theorem}[Subfield Rotations]
+The subfield $\Q(\zeta_{2^k})$ corresponds to working with $2^{k-2}$ ``super-slots'', each containing $2^{d-k+1}$ original slots. Rotations in superslots use:
+\[
+\sigma_{5^{2^{d-k}}} : \text{rotates super-slots by 1}
+\]
+\end{theorem}
+
+\begin{remark}[Multi-Resolution Processing]
+This tower structure enables multi-resolution processing: coarse rotations at the super-slot level, fine rotations within super-slots. For structured data (like images with spatial locality), this can reduce total rotation count.
+\end{remark}
+
+\subsubsection{Summary: Mathematical Optimization Principles}
+
+\begin{enumerate}
+    \item \textbf{Group Decomposition}: $(\Z/2N\Z)^* \cong \Z_2 \times \Z_{N/2}$ separates conjugation from rotation.
+    
+    \item \textbf{Binary Representation}: Logarithmically many keys suffice for any rotation via composition.
+    
+    \item \textbf{Root Permutation View}: Rotations permute evaluation points, enabling NTT-domain optimizations.
+    
+    \item \textbf{Eigenspace Structure}: Real/imaginary decomposition is preserved under rotation.
+    
+    \item \textbf{CRT Independence}: RNS components rotate independently, enabling parallelism.
+    
+    \item \textbf{Circulant Structure}: Rotations diagonalize in Fourier domain of slots.
+    
+    \item \textbf{Subfield Tower}: Multi-resolution rotation via cyclotomic subfield hierarchy.
+\end{enumerate}
+
+These mathematical structures provide the theoretical foundation for practical rotation optimizations implemented in high-performance CKKS libraries.
+
+\subsubsection{2D Convolution Extension}
+
+For 2D convolution (images), we extend the Toeplitz approach to \textbf{doubly-block Toeplitz} matrices.
+
+\begin{definition}[2D Convolution]
+For image $X \in \mathbb{R}^{H \times W}$ and kernel $K \in \mathbb{R}^{h \times w}$, the output $Y$ has:
+\[
+Y_{i,j} = \sum_{p=0}^{h-1} \sum_{q=0}^{w-1} K_{p,q} \cdot X_{i+p, j+q}
+\]
+\end{definition}
+
+\begin{theorem}[2D Convolution Rotation Count]
+When the image is encoded row-major in CKKS slots, 2D convolution with an $h \times w$ kernel requires at most $hw$ distinct rotations:
+\[
+\text{rotation amounts} = \{ p \cdot W + q : 0 \leq p < h, 0 \leq q < w \}
+\]
+where $W$ is the image width.
+\end{theorem}
+
+\begin{algorithm}[H]
+\caption{2D Convolution via Rotations}
+\begin{algorithmic}[1]
+\Function{Conv2D}{$K$, $\text{ct}_X$, GK, $H$, $W$}
+    \State \Comment{$K$ is $h \times w$ kernel, $X$ is $H \times W$ image in slots}
+    \State result $\gets 0$
+    \For{$p = 0$ to $h - 1$}
+        \For{$q = 0$ to $w - 1$}
+            \State $r \gets p \cdot W + q$ \Comment{Rotation amount}
+            \If{$r = 0$}
+                \State rotated $\gets \text{ct}_X$
+            \Else
+                \State rotated $\gets$ \Call{Rotate}{$\text{ct}_X$, $r$, GK}
+            \EndIf
+            \State result $\gets$ result $+ K_{p,q} \cdot$ rotated
+        \EndFor
+    \EndFor
+    \State \Return result
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\paragraph{Optimization with Hoisting and BSGS:}
+Combining hoisting (precompute INTT once) with BSGS decomposition:
+\begin{enumerate}
+    \item Decompose 2D rotations: $p \cdot W + q = (p \cdot W) + q$
+    \item Baby steps: rotations $\{0, 1, \ldots, w-1\}$ (horizontal shifts)
+    \item Giant steps: rotations $\{0, W, 2W, \ldots, (h-1)W\}$ (vertical shifts)
+\end{enumerate}
+
+Total rotations: $(h - 1) + (w - 1) = h + w - 2$ instead of $hw - 1$.
+
+%------------------------------------------------------------------------------
+\subsection{Strided Convolution and Pooling}
+%------------------------------------------------------------------------------
+
+Modern CNNs use strided convolutions and pooling layers, which require non-consecutive rotations.
+
+\begin{definition}[Stride-$s$ Convolution]
+With stride $s$, only every $s$-th output position is computed:
+\[
+Y_{i,j} = \sum_{p,q} K_{p,q} \cdot X_{s \cdot i + p, s \cdot j + q}
+\]
+\end{definition}
+
+\paragraph{Slot Packing for Strided Operations:}
+
+To handle strides efficiently, we use \textbf{interleaved packing}:
+\begin{enumerate}
+    \item Pack input with gaps: place $X_{i,j}$ in slot $s \cdot i \cdot W + s \cdot j$
+    \item Apply convolution rotations
+    \item Extract/mask non-zero output slots
+\end{enumerate}
+
+\begin{remark}[Rotation Count Independence]
+A remarkable property of the rotation-based approach is that the number of rotations depends only on the kernel size, not the input size. This makes CKKS convolution particularly efficient for large inputs with small kernels—the common case in deep learning.
+\end{remark}
+
+%==============================================================================
+\section{Complexity Summary}
+%==============================================================================
+
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Operation} & \textbf{Time Complexity} & \textbf{Space Complexity} \\
+\midrule
+Modular Add/Sub/Mul & $O(1)$ & $O(1)$ \\
+Modular Exponentiation & $O(\log n)$ & $O(1)$ \\
+Modular Inverse (Fermat) & $O(\log p)$ & $O(1)$ \\
+Extended GCD & $O(\log \min(a,b))$ & $O(\log \min(a,b))$ \\
+Miller-Rabin Test & $O(k \log^2 n)$ & $O(1)$ \\
+Bit Reversal & $O(n)$ & $O(n)$ \\
+Forward NTT & $O(n \log n)$ & $O(n)$ \\
+Inverse NTT & $O(n \log n)$ & $O(n)$ \\
+NTT Multiply & $O(n \log n)$ & $O(n)$ \\
+Naive Poly Multiply & $O(n^2)$ & $O(n)$ \\
+Polynomial Add/Sub & $O(n)$ & $O(n)$ \\
+\midrule
+CKKS Encoding & $O(N^2)$ & $O(N)$ \\
+CKKS Decoding & $O(N^2)$ & $O(N)$ \\
+Key Generation & $O(L \cdot N)$ & $O(L \cdot N)$ \\
+Encryption & $O(L \cdot N^2)$ & $O(L \cdot N)$ \\
+Decryption & $O(L \cdot N^2)$ & $O(L \cdot N)$ \\
+Homomorphic Add/Sub & $O(L \cdot N)$ & $O(L \cdot N)$ \\
+Scalar Multiplication & $O(L \cdot N)$ & $O(L \cdot N)$ \\
+\midrule
+\multicolumn{3}{c}{\textit{Rotation Operations}} \\
+\midrule
+Apply Automorphism & $O(N)$ & $O(N)$ \\
+Galois Element Computation & $O(|r|)$ & $O(1)$ \\
+Digit Decomposition & $O(D \cdot N)$ & $O(D \cdot N)$ \\
+Key Switching & $O(D \cdot L \cdot N^2)$ & $O(L \cdot N)$ \\
+Galois Key Generation (per key) & $O(D \cdot L \cdot N^2)$ & $O(D \cdot L \cdot N)$ \\
+Ciphertext Rotation & $O(D \cdot L \cdot N^2)$ & $O(L \cdot N)$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textit{Notes: $N$ = polynomial degree, $L$ = number of RNS primes, $D$ = number of decomposition digits, $|r|$ = rotation step count. With NTT-accelerated polynomial multiplication, key switching and rotation reduce to $O(D \cdot L \cdot N \log N)$.}
+
+%==============================================================================
+\section{Correctness Verification}
+%==============================================================================
+
+The implementation includes unit tests verifying:
+
+\begin{enumerate}
+    \item \textbf{Modular arithmetic:} Overflow handling, edge cases
+    \item \textbf{Modular inverse:} $a \cdot a^{-1} \equiv 1 \pmod{p}$
+    \item \textbf{Primality:} Known primes and composites
+    \item \textbf{Primitive roots:} $\omega^n \equiv 1$, $\omega^{n/2} \not\equiv 1$
+    \item \textbf{NTT round-trip:} $\text{INTT}(\text{NTT}(a)) = a$
+    \item \textbf{Polynomial operations:} Arithmetic identities
+    \item \textbf{Negacyclic convolution:} $X^N \equiv -1$
+    \item \textbf{CKKS encoding/decoding:} Round-trip accuracy within tolerance
+    \item \textbf{Key generation:} Valid key structure
+    \item \textbf{Encryption/decryption:} Message recovery within approximation error
+    \item \textbf{Homomorphic addition:} $\text{Dec}(\text{Enc}(a) + \text{Enc}(b)) \approx a + b$
+    \item \textbf{Homomorphic subtraction:} $\text{Dec}(\text{Enc}(a) - \text{Enc}(b)) \approx a - b$
+    \item \textbf{Scalar multiplication:} $\text{Dec}(k \cdot \text{Enc}(a)) \approx k \cdot a$
+    \item \textbf{Galois element computation:} $5^r \bmod 2N$ yields correct rotation elements
+    \item \textbf{Automorphism application:} $\sigma_k(a(X)) = a(X^k) \pmod{X^N + 1}$
+    \item \textbf{Galois key generation:} Keys decrypt $\sigma_k(s)$ under $s$
+    \item \textbf{Slot rotation:} Values are permuted correctly after rotation
+    \item \textbf{Rotation round-trip:} $\text{Rotate}(\text{Rotate}(\text{ct}, r), -r) \approx \text{ct}$
+\end{enumerate}
+
+%==============================================================================
+\section{Rust Programming Language: A Quick Reference}
+%==============================================================================
+
+This section provides a quick reference guide for Rust syntax, comparing it with Python and C++ for readers familiar with those languages. Rust combines the performance of C++ with memory safety guarantees, without a garbage collector.
+
+%------------------------------------------------------------------------------
+\subsection{Variables and Mutability}
+%------------------------------------------------------------------------------
+
+In Rust, variables are \textbf{immutable by default}, unlike Python and C++.
+
+\begin{center}
+\begin{tabular}{p{4cm}p{4cm}p{4cm}}
+\toprule
+\textbf{Python} & \textbf{C++} & \textbf{Rust} \\
+\midrule
+\begin{lstlisting}[language=Python,frame=none,numbers=none]
+x = 5
+x = 10  # OK
+\end{lstlisting}
+&
+\begin{lstlisting}[language=C++,frame=none,numbers=none]
+int x = 5;
+x = 10;  // OK
+\end{lstlisting}
+&
+\begin{lstlisting}[language=Rust,frame=none,numbers=none]
+let x = 5;
+// x = 10; ERROR!
+let mut y = 5;
+y = 10;  // OK
+\end{lstlisting}
+\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{remark}
+Rust's \texttt{let mut} is similar to C++ without \texttt{const}, while \texttt{let} (immutable) is like C++'s \texttt{const}.
+\end{remark}
+
+%------------------------------------------------------------------------------
+\subsection{Type System and Inference}
+%------------------------------------------------------------------------------
+
+Rust has strong static typing with excellent type inference, similar to C++ \texttt{auto}.
+
+\begin{center}
+\begin{tabular}{p{4cm}p{4cm}p{4cm}}
+\toprule
+\textbf{Python} & \textbf{C++} & \textbf{Rust} \\
+\midrule
+\begin{lstlisting}[language=Python,frame=none,numbers=none]
+x = 42
+y: int = 42
+s = "hello"
+\end{lstlisting}
+&
+\begin{lstlisting}[language=C++,frame=none,numbers=none]
+auto x = 42;
+int y = 42;
+auto s = "hello";
+\end{lstlisting}
+&
+\begin{lstlisting}[language=Rust,frame=none,numbers=none]
+let x = 42;
+let y: i64 = 42;
+let s = "hello";
+\end{lstlisting}
+\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Common Rust types:
+\begin{itemize}
+    \item \texttt{i8, i16, i32, i64, i128} — signed integers (like C++ \texttt{int8\_t}, etc.)
+    \item \texttt{u8, u16, u32, u64, u128} — unsigned integers
+    \item \texttt{f32, f64} — floating point (like C++ \texttt{float}, \texttt{double})
+    \item \texttt{bool} — boolean
+    \item \texttt{char} — Unicode character (4 bytes, unlike C++)
+    \item \texttt{\&str} — string slice (borrowed); \texttt{String} — owned string
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{Functions}
+%------------------------------------------------------------------------------
+
+\begin{center}
+\begin{tabular}{p{4cm}p{4cm}p{5cm}}
+\toprule
+\textbf{Python} & \textbf{C++} & \textbf{Rust} \\
+\midrule
+\begin{lstlisting}[language=Python,frame=none,numbers=none]
+def add(a, b):
+    return a + b
+
+def greet(name):
+    print(f"Hi {name}")
+\end{lstlisting}
+&
+\begin{lstlisting}[language=C++,frame=none,numbers=none]
+int add(int a, int b) {
+    return a + b;
+}
+
+void greet(string name) {
+    cout << "Hi " << name;
+}
+\end{lstlisting}
+&
+\begin{lstlisting}[language=Rust,frame=none,numbers=none]
+fn add(a: i32, b: i32) -> i32 {
+    a + b  // no semicolon = return
+}
+
+fn greet(name: &str) {
+    println!("Hi {}", name);
+}
+\end{lstlisting}
+\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{remark}
+In Rust, the last expression without a semicolon is the return value. Adding a semicolon makes it a statement returning \texttt{()}.
+\end{remark}
+
+%------------------------------------------------------------------------------
+\subsection{Structs and Methods}
+%------------------------------------------------------------------------------
+
+Rust uses \texttt{struct} for data and \texttt{impl} blocks for methods (no classes).
+
+\begin{center}
+\begin{tabular}{p{5cm}p{7cm}}
+\toprule
+\textbf{Python/C++} & \textbf{Rust} \\
+\midrule
+\begin{lstlisting}[language=Python,frame=none,numbers=none]
+# Python
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+    
+    def magnitude(self):
+        return (self.x**2 + self.y**2)**0.5
+\end{lstlisting}
+&
+\begin{lstlisting}[language=Rust,frame=none,numbers=none]
+struct Point {
+    x: f64,
+    y: f64,
+}
+
+impl Point {
+    fn new(x: f64, y: f64) -> Self {
+        Point { x, y }
+    }
+    
+    fn magnitude(&self) -> f64 {
+        (self.x.powi(2) + self.y.powi(2)).sqrt()
+    }
+}
+\end{lstlisting}
+\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Key differences:
+\begin{itemize}
+    \item \texttt{\&self} = immutable borrow (like \texttt{const} method in C++)
+    \item \texttt{\&mut self} = mutable borrow
+    \item \texttt{self} = takes ownership (moves the value)
+    \item \texttt{Self} refers to the implementing type
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{Ownership and Borrowing}
+%------------------------------------------------------------------------------
+
+Rust's most unique feature is its \textbf{ownership system}, which guarantees memory safety without garbage collection.
+
+\textbf{The Three Rules:}
+\begin{enumerate}
+    \item Each value has exactly one \textbf{owner}
+    \item When the owner goes out of scope, the value is dropped (freed)
+    \item You can have either:
+    \begin{itemize}
+        \item One mutable reference (\texttt{\&mut T}), OR
+        \item Any number of immutable references (\texttt{\&T})
+    \end{itemize}
+\end{enumerate}
+
+\begin{lstlisting}[language=Rust]
+fn main() {
+    let s1 = String::from("hello");
+    let s2 = s1;           // s1 is MOVED to s2, s1 no longer valid
+    // println!("{}", s1); // ERROR: s1 was moved
+    
+    let s3 = String::from("world");
+    let s4 = &s3;          // s4 BORROWS s3 (immutable reference)
+    println!("{} {}", s3, s4);  // OK: both valid
+    
+    let mut s5 = String::from("hi");
+    let s6 = &mut s5;      // mutable borrow
+    s6.push_str(" there"); // can modify through s6
+}
+\end{lstlisting}
+
+\textbf{Comparison with C++:}
+\begin{itemize}
+    \item Rust's move is like C++ \texttt{std::move}, but enforced by the compiler
+    \item \texttt{\&T} is like \texttt{const T\&}
+    \item \texttt{\&mut T} is like \texttt{T\&}
+    \item No null pointers — use \texttt{Option<T>} instead
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{Vectors and Iterators}
+%------------------------------------------------------------------------------
+
+\begin{center}
+\begin{tabular}{p{4cm}p{4cm}p{5cm}}
+\toprule
+\textbf{Python} & \textbf{C++} & \textbf{Rust} \\
+\midrule
+\begin{lstlisting}[language=Python,frame=none,numbers=none]
+nums = [1, 2, 3]
+nums.append(4)
+
+for x in nums:
+    print(x)
+
+squared = [x**2 for x in nums]
+\end{lstlisting}
+&
+\begin{lstlisting}[language=C++,frame=none,numbers=none]
+vector<int> nums = {1,2,3};
+nums.push_back(4);
+
+for (auto x : nums) {
+    cout << x;
+}
+\end{lstlisting}
+&
+\begin{lstlisting}[language=Rust,frame=none,numbers=none]
+let mut nums = vec![1, 2, 3];
+nums.push(4);
+
+for x in &nums {
+    println!("{}", x);
+}
+
+let squared: Vec<_> = nums
+    .iter()
+    .map(|x| x * x)
+    .collect();
+\end{lstlisting}
+\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Iterator methods commonly used in this project:
+\begin{itemize}
+    \item \texttt{.iter()} — iterate by reference
+    \item \texttt{.iter\_mut()} — iterate by mutable reference  
+    \item \texttt{.into\_iter()} — iterate by value (consumes)
+    \item \texttt{.map(|x| ...)} — transform each element
+    \item \texttt{.filter(|x| ...)} — keep elements matching predicate
+    \item \texttt{.zip(other)} — pair elements from two iterators
+    \item \texttt{.enumerate()} — add index: \texttt{(0, item), (1, item), ...}
+    \item \texttt{.collect()} — gather into a collection
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\subsection{Error Handling: Result and Option}
+%------------------------------------------------------------------------------
+
+Rust uses \texttt{Result<T, E>} and \texttt{Option<T>} instead of exceptions or null.
+
+\begin{lstlisting}[language=Rust]
+// Option: value that might not exist
+fn find_element(arr: &[i32], target: i32) -> Option<usize> {
+    for (i, &val) in arr.iter().enumerate() {
+        if val == target {
+            return Some(i);  // Found it
+        }
+    }
+    None  // Not found
+}
+
+// Using Option
+match find_element(&[1, 2, 3], 2) {
+    Some(idx) => println!("Found at {}", idx),
+    None => println!("Not found"),
+}
+
+// Or use if-let for single case
+if let Some(idx) = find_element(&[1, 2, 3], 2) {
+    println!("Found at {}", idx);
+}
+
+// Result: operation that might fail
+fn divide(a: f64, b: f64) -> Result<f64, String> {
+    if b == 0.0 {
+        Err("Division by zero".to_string())
+    } else {
+        Ok(a / b)
+    }
+}
+
+// The ? operator propagates errors (like Python's raise or C++ throw)
+fn calculate() -> Result<f64, String> {
+    let x = divide(10.0, 2.0)?;  // Returns early if Err
+    let y = divide(x, 5.0)?;
+    Ok(y)
+}
+\end{lstlisting}
+
+%------------------------------------------------------------------------------
+\subsection{Modules and Visibility}
+%------------------------------------------------------------------------------
+
+Rust organizes code into modules. Everything is \textbf{private by default}.
+
+\begin{lstlisting}[language=Rust]
+// In lib.rs or main.rs
+pub mod math {           // pub makes module visible outside
+    pub mod modular {    // nested module
+        pub fn mod_add(a: u64, b: u64, m: u64) -> u64 {
+            (a + b) % m
+        }
+        
+        fn helper() { }  // private, only visible in this module
+    }
+}
+
+// Using modules
+use crate::math::modular::mod_add;
+let result = mod_add(5, 3, 7);
+\end{lstlisting}
+
+File structure maps to modules:
+\begin{verbatim}
+src/
+  lib.rs          -> crate root
+  math/
+    mod.rs        -> pub mod math
+    modular.rs    -> pub mod modular (declared in mod.rs)
+    ntt.rs        -> pub mod ntt (declared in mod.rs)
+\end{verbatim}
+
+%------------------------------------------------------------------------------
+\subsection{Useful Macros}
+%------------------------------------------------------------------------------
+
+Rust macros end with \texttt{!} and are used extensively:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{Macro} & \textbf{Purpose} \\
+\midrule
+\texttt{println!("x = \{\}", x)} & Print with newline (like Python \texttt{print}) \\
+\texttt{vec![1, 2, 3]} & Create a \texttt{Vec} \\
+\texttt{assert!(condition)} & Panic if false (like C++ \texttt{assert}) \\
+\texttt{assert\_eq!(a, b)} & Panic if \texttt{a != b} \\
+\texttt{panic!("error")} & Crash with message \\
+\texttt{todo!()} & Placeholder for unimplemented code \\
+\texttt{dbg!(expr)} & Print expression and value for debugging \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%------------------------------------------------------------------------------
+\subsection{Testing}
+%------------------------------------------------------------------------------
+
+Rust has built-in testing support:
+
+\begin{lstlisting}[language=Rust]
+// Tests go in the same file, in a tests module
+#[cfg(test)]           // Only compile for tests
+mod tests {
+    use super::*;      // Import from parent module
+    
+    #[test]            // Mark as test function
+    fn test_addition() {
+        assert_eq!(2 + 2, 4);
+    }
+    
+    #[test]
+    #[should_panic]    // Test expects a panic
+    fn test_divide_by_zero() {
+        divide(1.0, 0.0).unwrap();  // unwrap panics on Err
+    }
+}
+\end{lstlisting}
+
+Run tests with: \texttt{cargo test}
+
+%------------------------------------------------------------------------------
+\subsection{Quick Reference Card}
+%------------------------------------------------------------------------------
+
+\begin{center}
+\begin{tabular}{p{3.5cm}p{4cm}p{4.5cm}}
+\toprule
+\textbf{Concept} & \textbf{Python/C++} & \textbf{Rust} \\
+\midrule
+Print & \texttt{print(x)} / \texttt{cout << x} & \texttt{println!("\{\}", x)} \\
+String concat & \texttt{s1 + s2} & \texttt{format!("\{\}\{\}", s1, s2)} \\
+Array/Vector & \texttt{[1,2,3]} / \texttt{vector} & \texttt{vec![1, 2, 3]} \\
+Range loop & \texttt{for i in range(n)} & \texttt{for i in 0..n} \\
+Inclusive range & \texttt{range(1, n+1)} & \texttt{for i in 1..=n} \\
+Lambda & \texttt{lambda x: x*2} & \texttt{|x| x * 2} \\
+Null/None & \texttt{None} / \texttt{nullptr} & \texttt{None} (in \texttt{Option}) \\
+Type cast & \texttt{int(x)} / \texttt{(int)x} & \texttt{x as i32} \\
+Ternary & \texttt{a if cond else b} & \texttt{if cond \{ a \} else \{ b \}} \\
+Constructor & \texttt{\_\_init\_\_} / ctor & \texttt{fn new() -> Self} (convention) \\
+Self reference & \texttt{self} / \texttt{this} & \texttt{self}, \texttt{\&self}, \texttt{\&mut self} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%==============================================================================
+\section{References}
+%==============================================================================
+
+\begin{enumerate}
+    \item Cheon, J. H., Kim, A., Kim, M., \& Song, Y. (2017). Homomorphic encryption for arithmetic of approximate numbers. \textit{ASIACRYPT 2017}.
+    
+    \item Cooley, J. W., \& Tukey, J. W. (1965). An algorithm for the machine calculation of complex Fourier series. \textit{Mathematics of Computation}.
+    
+    \item Garner, H. L. (1959). The residue number system. \textit{IRE Transactions on Electronic Computers}.
+    
+    \item \label{halevi2014algorithms} Halevi, S., \& Shoup, V. (2014). Algorithms in HElib. \textit{CRYPTO 2014}. IACR ePrint 2014/106.
+    
+    \item \label{juvekar2018gazelle} Juvekar, C., Vaikuntanathan, V., \& Chandrakasan, A. (2018). GAZELLE: A Low Latency Framework for Secure Neural Network Inference. \textit{USENIX Security 2018}. arXiv:1801.05507.
+    
+    \item Miller, G. L. (1976). Riemann's hypothesis and tests for primality. \textit{Journal of Computer and System Sciences}.
+    
+    \item \label{openfhe} Al Badawi, A., et al. (2022). OpenFHE: Open-Source Fully Homomorphic Encryption Library. \textit{WAHC 2022}. \url{https://github.com/openfheorg/openfhe-development}
+    
+    \item The Rust Programming Language. \url{https://doc.rust-lang.org/book/}
+\end{enumerate}
+
+\end{document}

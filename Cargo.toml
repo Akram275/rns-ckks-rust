@@ -1,0 +1,32 @@
+[package]
+name = "ckks"
+version = "0.1.0"
+edition = "2021"
+authors = ["Akram"]
+description = "A Rust implementation of RNS-CKKS homomorphic encryption"
+
+[dependencies]
+# Complex number support for CKKS encoding/decoding
+num-complex = "0.4"
+# Traits for numeric types
+num-traits = "0.2"
+# Random number generation for key generation
+rand = "0.8"
+# Distributions for random sampling (Gaussian errors)
+rand_distr = "0.4"
+# For parallel computation (useful later for NTT)
+# rayon = "1.8"  # Uncomment when using newer Rust
+# Arbitrary precision integers (for testing/validation)
+num-bigint = "0.4"
+
+[dev-dependencies]
+# For benchmarking (uncomment when ready)
+# criterion = "0.5"
+
+# [[bench]]
+# name = "ntt_bench"
+# harness = false
+
+[profile.release]
+opt-level = 3
+lto = true

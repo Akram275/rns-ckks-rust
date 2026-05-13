@@ -1,0 +1,31 @@
+\contentsline {section}{\numberline {1}Introduction}{2}{section.1}%
+\contentsline {section}{\numberline {2}Modular Arithmetic}{2}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Modular Addition and Subtraction}{2}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Modular Multiplication}{2}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Modular Exponentiation (Square-and-Multiply)}{3}{subsection.2.3}%
+\contentsline {subsection}{\numberline {2.4}Modular Inverse}{3}{subsection.2.4}%
+\contentsline {subsubsection}{\numberline {2.4.1}Method 1: Fermat's Little Theorem (Prime Modulus)}{4}{subsubsection.2.4.1}%
+\contentsline {subsubsection}{\numberline {2.4.2}Method 2: Extended Euclidean Algorithm (General Case)}{4}{subsubsection.2.4.2}%
+\contentsline {subsection}{\numberline {2.5}Miller-Rabin Primality Test}{4}{subsection.2.5}%
+\contentsline {subsection}{\numberline {2.6}Finding Primitive Roots of Unity}{5}{subsection.2.6}%
+\contentsline {section}{\numberline {3}Number Theoretic Transform (NTT)}{6}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Mathematical Foundation}{6}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}NTT Context Pre-computation}{7}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Bit-Reversal Permutation}{7}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}Cooley-Tukey Forward NTT}{7}{subsection.3.4}%
+\contentsline {subsection}{\numberline {3.5}Gentleman-Sande Inverse NTT}{8}{subsection.3.5}%
+\contentsline {subsection}{\numberline {3.6}Polynomial Multiplication via NTT}{8}{subsection.3.6}%
+\contentsline {section}{\numberline {4}Polynomial Ring Operations}{9}{section.4}%
+\contentsline {subsection}{\numberline {4.1}The Ring Structure}{9}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Polynomial Addition and Subtraction}{9}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Scalar Multiplication}{9}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}Polynomial Negation}{9}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.5}Naive Polynomial Multiplication (Negacyclic)}{10}{subsection.4.5}%
+\contentsline {section}{\numberline {5}Residue Number System (RNS)}{10}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Mathematical Foundation}{10}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}RNS Polynomial Representation}{10}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}RNS Arithmetic}{11}{subsection.5.3}%
+\contentsline {section}{\numberline {6}NTT-Friendly Prime Generation}{11}{section.6}%
+\contentsline {section}{\numberline {7}Complexity Summary}{11}{section.7}%
+\contentsline {section}{\numberline {8}Correctness Verification}{12}{section.8}%
+\contentsline {section}{\numberline {9}References}{12}{section.9}%
