@@ -1,5 +1,6 @@
 use super::{RnsCiphertext, RnsCkksContext, RnsPolynomial, RnsPublicKey, RnsQuadraticCiphertext, RnsSecretKey};
 use crate::rns::{galois_element_for_rotation, RnsRotationKey};
+use crate::rns::keyswitching::keyswitch_rns;
 
 impl RnsCkksContext {
     pub fn apply_galois_automorphism(&self, poly: &RnsPolynomial, galois_element: usize) -> RnsPolynomial {
@@ -56,7 +57,10 @@ impl RnsCkksContext {
         let keyswitch_key = rotation_key
             .keyswitch_key
             .truncate_levels(ciphertext.level + 1);
-        let switched = self.keyswitch(&raw_rotated.c1, &keyswitch_key);
+        let context = self
+            .level_context(ciphertext.level)
+            .expect("rotation level context must exist");
+        let switched = keyswitch_rns(&raw_rotated.c1, &keyswitch_key, &context);
 
         RnsCiphertext::new(
             raw_rotated.c0.add(&switched.c0),

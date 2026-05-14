@@ -4,7 +4,6 @@ use num_traits::Zero;
 use super::basis::RnsContext;
 use super::ciphertexts::{RnsCiphertext, RnsQuadraticCiphertext};
 use super::keys::{sample_error_poly, sample_ternary_poly, RnsPublicKey, RnsSecretKey};
-use super::keyswitching::{decompose_poly_rns_with_levels, num_decomp_digits, RnsKeySwitchingKey};
 use super::polynomial::{mod_q_biguint_to_centered, RnsPolynomial};
 
 pub(crate) fn encrypt_rns(
@@ -158,22 +157,6 @@ pub(crate) fn rescale_quadratic_ciphertext_rns(
         scale_bits: ciphertext.scale_bits.saturating_sub(dropped_prime_bits),
         level: ciphertext.level - 1,
     }
-}
-
-pub(crate) fn keyswitch_rns(poly: &RnsPolynomial, ksk: &RnsKeySwitchingKey, context: &RnsContext) -> RnsCiphertext {
-    assert_eq!(ksk.level, context.levels() - 1, "keyswitch key level must match the active modulus chain");
-    let active_digits = num_decomp_digits(context.total_modulus_bits(), ksk.decomp_bits);
-    assert!(ksk.ksk.len() >= active_digits, "keyswitch key must cover the active modulus chain");
-    let digits = decompose_poly_rns_with_levels(poly, context, ksk.decomp_bits, ksk.ksk.len());
-    let mut result_c0 = RnsPolynomial::zero(context);
-    let mut result_c1 = RnsPolynomial::zero(context);
-
-    for (digit_poly, key_ct) in digits.iter().zip(ksk.ksk.iter()) {
-        result_c0 = result_c0.add(&digit_poly.multiply_ntt(&key_ct.c0, context));
-        result_c1 = result_c1.add(&digit_poly.multiply_ntt(&key_ct.c1, context));
-    }
-
-    RnsCiphertext::new(result_c0, result_c1, poly.levels())
 }
 
 pub(crate) fn div_round_nearest(value: &BigInt, divisor: &BigInt) -> BigInt {

@@ -1,7 +1,8 @@
 use num_complex::Complex64;
 
 use super::{RnsCkksContext, RnsCiphertext, RnsKeySwitchingKey, RnsPolynomial, RnsPublicKey, RnsQuadraticCiphertext, RnsSecretKey};
-use crate::rns::ops::{decrypt_quadratic_rns, decrypt_rns, encrypt_rns, keyswitch_rns, multiply_ciphertexts_rns, multiply_plain_rns, rescale_ciphertext_rns, rescale_quadratic_ciphertext_rns};
+use crate::rns::keyswitching::keyswitch_rns;
+use crate::rns::ops::{decrypt_quadratic_rns, decrypt_rns, encrypt_rns, multiply_ciphertexts_rns, multiply_plain_rns, rescale_ciphertext_rns, rescale_quadratic_ciphertext_rns};
 
 impl RnsCkksContext {
     pub fn encrypt(&self, plaintext: &RnsPolynomial, public_key: &RnsPublicKey) -> RnsCiphertext {
