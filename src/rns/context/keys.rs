@@ -21,8 +21,13 @@ impl RnsCkksContext {
         target_public_key: &RnsPublicKey,
         level: usize,
     ) -> RnsKeySwitchingKey {
-        self.generate_keyswitch_key(source, target_public_key)
-            .truncate_levels(level + 1)
+        let level_context = self
+            .level_context(level)
+            .expect("keyswitch level context must exist");
+        let source = source.truncate_levels(level + 1);
+        let target_public_key = target_public_key.truncate_levels(level + 1);
+
+        generate_keyswitch_key_rns(&source, &target_public_key, &level_context, RNS_DECOMP_BITS)
     }
 
     pub fn generate_relinearization_key(
@@ -40,7 +45,13 @@ impl RnsCkksContext {
         public_key: &RnsPublicKey,
         level: usize,
     ) -> RnsKeySwitchingKey {
-        self.generate_relinearization_key(secret_key, public_key)
-            .truncate_levels(level + 1)
+        let level_context = self
+            .level_context(level)
+            .expect("relinearization level context must exist");
+        let truncated_secret = secret_key.poly.truncate_levels(level + 1);
+        let source = truncated_secret.multiply_ntt(&truncated_secret, &level_context);
+        let target_public_key = public_key.truncate_levels(level + 1);
+
+        generate_keyswitch_key_rns(&source, &target_public_key, &level_context, RNS_DECOMP_BITS)
     }
 }

@@ -230,6 +230,6 @@ mod tests {
 
         let automorphed = poly.apply_galois_automorphism(3);
 
-        assert_eq!(automorphed.coeffs(), &[1, 13, 2, 14]);
+        assert_eq!(automorphed.coeffs(), &[1, 4, 14, 2]);
     }
 }

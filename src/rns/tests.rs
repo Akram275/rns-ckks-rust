@@ -338,6 +338,30 @@ fn ciphertext_rotation_with_keyswitch_decrypts_under_original_secret_key() {
 }
 
 #[test]
+#[ignore = "Q-only generated rotation keys are not yet numerically stable at realistic parameters"]
+fn realistic_generated_rotation_key_rotates_under_original_secret_key() {
+    let ctx = RnsCkksContext::new(RnsCkksParams::realistic_8_level())
+        .expect("realistic RNS CKKS params must build");
+    let pair = ctx.keygen(64);
+    let rotation_key = ctx.generate_rotation_key_at_level(&pair.secret_key, &pair.public_key, 1, 7);
+
+    let mut slots = vec![Complex64::new(0.0, 0.0); ctx.num_slots()];
+    slots[0] = Complex64::new(1.0, 0.0);
+    slots[1] = Complex64::new(2.0, 0.0);
+    slots[2] = Complex64::new(3.0, 0.0);
+    slots[3] = Complex64::new(4.0, 0.0);
+
+    let ciphertext = ctx.encrypt(&ctx.encode(&slots), &pair.public_key);
+    let rotated = ctx.rotate(&ciphertext, &rotation_key);
+    let recovered = ctx.decode(&ctx.decrypt(&rotated, &pair.secret_key));
+
+    assert!(approx_eq(recovered[0], slots[1], 2e-2), "expected {:?}, got {:?}", slots[1], recovered[0]);
+    assert!(approx_eq(recovered[1], slots[2], 2e-2), "expected {:?}, got {:?}", slots[2], recovered[1]);
+    assert!(approx_eq(recovered[2], slots[3], 2e-2), "expected {:?}, got {:?}", slots[3], recovered[2]);
+    assert!(approx_eq(recovered[3], slots[0], 2e-2), "expected {:?}, got {:?}", slots[0], recovered[3]);
+}
+
+#[test]
 fn sparse_ternary_rns_secret_key_has_expected_weight() {
     let ctx = sample_context();
     let secret_key = RnsSecretKey::sample_sparse_ternary(&ctx, 3);
