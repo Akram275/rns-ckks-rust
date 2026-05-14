@@ -17,6 +17,10 @@ impl RnsCkksContext {
         self.decode_at_scale(poly, self.params.scale_bits)
     }
 
+    pub fn decode_real(&self, poly: &RnsPolynomial) -> Vec<f64> {
+        self.decode(poly).into_iter().map(|value| value.re).collect()
+    }
+
     pub fn encode_at_level_and_scale(
         &self,
         slots: &[Complex64],
@@ -41,5 +45,12 @@ impl RnsCkksContext {
             &context.total_modulus(),
             &coeffs_biguint,
         )
+    }
+
+    pub fn decode_real_at_scale(&self, poly: &RnsPolynomial, scale_bits: usize) -> Vec<f64> {
+        self.decode_at_scale(poly, scale_bits)
+            .into_iter()
+            .map(|value| value.re)
+            .collect()
     }
 }
