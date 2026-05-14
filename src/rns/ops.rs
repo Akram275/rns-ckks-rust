@@ -3,7 +3,8 @@ use num_traits::Zero;
 
 use super::basis::RnsContext;
 use super::ciphertexts::{RnsCiphertext, RnsQuadraticCiphertext};
-use super::keys::{decompose_poly_rns_with_levels, num_decomp_digits, sample_error_poly, sample_ternary_poly, RnsKeySwitchingKey, RnsPublicKey, RnsSecretKey};
+use super::keys::{sample_error_poly, sample_ternary_poly, RnsPublicKey, RnsSecretKey};
+use super::keyswitching::{decompose_poly_rns_with_levels, num_decomp_digits, RnsKeySwitchingKey};
 use super::polynomial::{mod_q_biguint_to_centered, RnsPolynomial};
 
 pub(crate) fn encrypt_rns(

@@ -1,6 +1,6 @@
 # RNS CKKS in Rust
 
-This repository contains a Rust implementation of an RNS-based CKKS homomorphic encryption scaffold with realistic parameter support.
+A Rust implementation of RNS CKKS (Cheon, Kim, Kim, Song) homomorphic encryption.
 
 The current codebase focuses on:
 
@@ -9,7 +9,7 @@ The current codebase focuses on:
 - Encrypt and decrypt round trips
 - Ciphertext-plaintext Hadamard multiplication
 - Ciphertext-ciphertext Hadamard multiplication
-- Relinearization scaffolding
+- Relinearization 
 - NTT-backed polynomial-polynomial multiplication
 
 ## Running tests
