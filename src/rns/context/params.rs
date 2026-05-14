@@ -1,3 +1,7 @@
+//This is the implementation of the RNSCKKSParams structure object, and the definition of few param sets
+//The validation funcions checks that each prime is ditinct, and that it is able to support the NTT for the given polynomial degree via the test q_i = 1 mod 2n.
+
+
 use super::{RnsCkksParams, RnsContext};
 use crate::rns::basis::{default_rns_primes, RnsPrime};
 

@@ -1,7 +1,7 @@
-//! Canonical embedding for polynomials via evaluation/interpolation on roots of unity.
-//!
-//! This implements the dense O(n^2) DFT/IDFT-style maps used as the mathematical
-//! foundation for CKKS encoding. Later encoding will scale and round these values.
+// Canonical embedding for polynomials via evaluation/interpolation on roots of unity.
+//
+// This implements the dense O(n^2) DFT/IDFT-style maps used as the mathematical
+// foundation for CKKS encoding. Later encoding will scale and round these values.
 
 use num_complex::Complex64;
 use std::f64::consts::PI;
@@ -27,10 +27,11 @@ pub fn canonical_embedding_forward(coeffs: &[Complex64]) -> Vec<Complex64> {
     values
 }
 
-/// Backward canonical embedding (interpolation): recover coefficients from values.
-///
-/// This is the inverse map of `canonical_embedding_forward`, computed as:
-/// a_j = (1/n) * sum_{k=0}^{n-1} y_k * w^{-j*k}.
+// Backward canonical embedding (interpolation): recover coefficients of a 
+// polynomial whose evaluation at the n primitive 2n roots for unity gives the input complex values.
+//
+// This is the inverse map of `canonical_embedding_forward`, computed as:
+// a_j = (1/n) * sum_{k=0}^{n-1} y_k * w^{-j*k}.
 pub fn canonical_embedding_backward(values: &[Complex64]) -> Vec<Complex64> {
     let n = values.len();
     assert!(n > 0, "value vector must be non-empty");

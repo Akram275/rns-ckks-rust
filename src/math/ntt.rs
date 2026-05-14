@@ -1,6 +1,6 @@
-//! Number-theoretic transform helpers for modular polynomial multiplication.
-
-/// Plan for a radix-2 NTT over a prime modulus.
+// Number-theoretic transform helpers for modular polynomial multiplication.
+// Reduces modular polynomial multiplication from O(n^2) to O(n log n) for polynomials of degree n, given a suitable NTT plan.
+// Plan for a radix-2 NTT over a prime modulus.
 #[derive(Clone, Debug)]
 pub struct NttPlan {
     modulus: u64,

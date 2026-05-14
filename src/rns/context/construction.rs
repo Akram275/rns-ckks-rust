@@ -1,3 +1,8 @@
+//This file contains the implementation of the RnsCKKSContext structure object
+//It is an encapsulation of the parameters set and the NTT plan, 
+// which will be used to generate the key set and encoder/decoder objects. 
+//
+
 use super::{RnsCkksContext, RnsCkksParams, RnsContext};
 
 impl RnsCkksContext {

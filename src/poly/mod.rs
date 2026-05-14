@@ -1,4 +1,4 @@
-//! Modular polynomial arithmetic built on top of an NTT plan.
+// Modular polynomial arithmetic built on top of an NTT plan.
 
 use crate::math::ntt::NttPlan;
 
@@ -105,8 +105,8 @@ impl ModularPolynomial {
 
         Self::new(result, self.modulus)
     }
-
-    /// Multiply two polynomials in Z_q[X]/(X^n + 1).
+    //This is the standard used polynomial multiplication in all the library
+    //It uses the fundamental relation: a(x)b(x) = NTT^{-1}(NTT(a) pointwise_mult NTT(b))
     pub fn multiply_ntt(&self, other: &Self, plan: &NttPlan) -> Self {
         self.assert_compatible(other);
         assert_eq!(self.degree(), plan.size(), "NTT plan size must match polynomial degree");
