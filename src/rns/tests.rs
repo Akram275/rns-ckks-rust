@@ -1,7 +1,8 @@
 use super::basis::default_rns_primes;
 use super::keys::sample_error_poly;
+use super::keyswitching::{num_decomp_digits, RnsKeySwitchingKey};
 use super::ops::encrypt_rns_with_samples;
-use super::{RnsCkksContext, RnsCkksParams, RnsCiphertext, RnsContext, RnsPolynomial, RnsPrime, RnsSecretKey};
+use super::{galois_element_for_rotation, RnsCkksContext, RnsCkksParams, RnsCiphertext, RnsContext, RnsPolynomial, RnsPrime, RnsRotationKey, RnsSecretKey, RNS_DECOMP_BITS};
 use num_bigint::BigUint;
 use num_complex::Complex64;
 
@@ -29,6 +30,38 @@ fn sample_ckks_context() -> RnsCkksContext {
         scale_bits: 40,
     })
     .expect("sample RNS CKKS context must be valid")
+}
+
+fn noiseless_rotation_key(ctx: &RnsCkksContext, secret_key: &RnsSecretKey, steps: isize) -> RnsRotationKey {
+    let galois_element = ctx.galois_element_for_rotation(steps);
+    let source = secret_key.apply_galois_automorphism(galois_element).poly;
+    let context = ctx.rns_context();
+    let modulus = context.total_modulus();
+    let digits = num_decomp_digits(modulus.bits(), RNS_DECOMP_BITS);
+    let mut base_power = BigUint::from(1u64);
+    let base = BigUint::from(1u64) << RNS_DECOMP_BITS;
+    let source_coeffs = source.reconstruct_coefficients(context);
+    let zero = context.zero_poly();
+    let mut ksk = Vec::with_capacity(digits);
+
+    for _ in 0..digits {
+        let coeffs: Vec<BigUint> = source_coeffs
+            .iter()
+            .map(|coeff| (coeff * &base_power) % &modulus)
+            .collect();
+        let plaintext = context.poly_from_biguint_coeffs(&coeffs);
+        ksk.push(RnsCiphertext::new(plaintext, zero.clone(), 0));
+        base_power = (&base_power * &base) % &modulus;
+    }
+
+    RnsRotationKey {
+        galois_element,
+        keyswitch_key: RnsKeySwitchingKey {
+            ksk,
+            decomp_bits: RNS_DECOMP_BITS,
+            level: context.levels() - 1,
+        },
+    }
 }
 
 #[test]
@@ -226,6 +259,82 @@ fn rns_ciphertext_drop_last_level_tracks_level() {
     assert_eq!(dropped.level, 1);
     assert_eq!(dropped.c0.levels(), 2);
     assert_eq!(dropped.c1.levels(), 2);
+}
+
+#[test]
+fn galois_element_for_rotation_uses_generator_five() {
+    let ctx = sample_ckks_context();
+
+    assert_eq!(ctx.galois_element_for_rotation(0), 1);
+    assert_eq!(ctx.galois_element_for_rotation(1), 5);
+    assert_eq!(ctx.galois_element_for_rotation(2), 9);
+    assert_eq!(galois_element_for_rotation(ctx.params().poly_degree, -1), 13);
+}
+
+#[test]
+fn raw_plain_rotation_matches_slot_shift() {
+    let ctx = sample_ckks_context();
+    let slots = vec![
+        Complex64::new(1.0, 0.0),
+        Complex64::new(2.0, 0.0),
+        Complex64::new(3.0, 0.0),
+        Complex64::new(4.0, 0.0),
+    ];
+
+    let plaintext = ctx.encode(&slots);
+    let rotated = ctx.rotate_plain_raw(&plaintext, 1);
+    let recovered = ctx.decode(&rotated);
+
+    assert!(approx_eq(recovered[0], slots[1], 1e-3));
+    assert!(approx_eq(recovered[1], slots[2], 1e-3));
+    assert!(approx_eq(recovered[2], slots[3], 1e-3));
+    assert!(approx_eq(recovered[3], slots[0], 1e-3));
+}
+
+#[test]
+fn raw_ciphertext_rotation_decrypts_under_rotated_secret_key() {
+    let ctx = sample_ckks_context();
+    let pair = ctx.keygen(3);
+    let slots = vec![
+        Complex64::new(1.0, 0.0),
+        Complex64::new(2.0, 0.0),
+        Complex64::new(3.0, 0.0),
+        Complex64::new(4.0, 0.0),
+    ];
+
+    let plaintext = ctx.encode(&slots);
+    let ciphertext = ctx.encrypt(&plaintext, &pair.public_key);
+    let rotated_ct = ctx.rotate_raw(&ciphertext, 1);
+    let rotated_sk = ctx.rotate_secret_key_raw(&pair.secret_key, 1);
+    let recovered = ctx.decode(&ctx.decrypt(&rotated_ct, &rotated_sk));
+
+    assert!(approx_eq(recovered[0], slots[1], 5e-3));
+    assert!(approx_eq(recovered[1], slots[2], 5e-3));
+    assert!(approx_eq(recovered[2], slots[3], 5e-3));
+    assert!(approx_eq(recovered[3], slots[0], 5e-3));
+}
+
+#[test]
+fn ciphertext_rotation_with_keyswitch_decrypts_under_original_secret_key() {
+    let ctx = sample_ckks_context();
+    let pair = ctx.keygen(3);
+    let rotation_key = noiseless_rotation_key(&ctx, &pair.secret_key, 1);
+    let slots = vec![
+        Complex64::new(1.0, 0.0),
+        Complex64::new(2.0, 0.0),
+        Complex64::new(3.0, 0.0),
+        Complex64::new(4.0, 0.0),
+    ];
+
+    let plaintext = ctx.encode(&slots);
+    let ciphertext = ctx.encrypt(&plaintext, &pair.public_key);
+    let rotated = ctx.rotate(&ciphertext, &rotation_key);
+    let recovered = ctx.decode(&ctx.decrypt(&rotated, &pair.secret_key));
+
+    assert!(approx_eq(recovered[0], slots[1], 5e-3), "expected {:?}, got {:?}", slots[1], recovered[0]);
+    assert!(approx_eq(recovered[1], slots[2], 5e-3), "expected {:?}, got {:?}", slots[2], recovered[1]);
+    assert!(approx_eq(recovered[2], slots[3], 5e-3), "expected {:?}, got {:?}", slots[3], recovered[2]);
+    assert!(approx_eq(recovered[3], slots[0], 5e-3), "expected {:?}, got {:?}", slots[0], recovered[3]);
 }
 
 #[test]

@@ -3,6 +3,7 @@ mod encoding;
 mod keys;
 mod ops;
 mod params;
+mod rotation;
 
 use super::basis::{RnsContext, RnsPrime};
 use super::ciphertexts::{RnsCiphertext, RnsQuadraticCiphertext};

@@ -32,6 +32,16 @@ impl RnsQuadraticCiphertext {
             level,
         }
     }
+
+    pub fn apply_galois_automorphism(&self, galois_element: usize) -> Self {
+        Self {
+            c0: self.c0.apply_galois_automorphism(galois_element),
+            c1: self.c1.apply_galois_automorphism(galois_element),
+            c2: self.c2.apply_galois_automorphism(galois_element),
+            scale_bits: self.scale_bits,
+            level: self.level,
+        }
+    }
 }
 
 impl RnsCiphertext {
@@ -53,6 +63,15 @@ impl RnsCiphertext {
         Self {
             c0: self.c0.add(&other.c0),
             c1: self.c1.add(&other.c1),
+            scale_bits: self.scale_bits,
+            level: self.level,
+        }
+    }
+
+    pub fn apply_galois_automorphism(&self, galois_element: usize) -> Self {
+        Self {
+            c0: self.c0.apply_galois_automorphism(galois_element),
+            c1: self.c1.apply_galois_automorphism(galois_element),
             scale_bits: self.scale_bits,
             level: self.level,
         }

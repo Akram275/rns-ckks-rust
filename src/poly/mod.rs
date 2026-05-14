@@ -105,6 +105,30 @@ impl ModularPolynomial {
 
         Self::new(result, self.modulus)
     }
+
+    /// Apply the Galois automorphism sigma_m: X -> X^m in Z_q[X]/(X^n + 1).
+    pub fn apply_galois_automorphism(&self, galois_element: usize) -> Self {
+        assert!(galois_element % 2 == 1, "galois automorphisms require an odd exponent");
+        let n = self.degree();
+        let modulus_2n = 2 * n;
+        let mut result = vec![0u64; n];
+
+        for (index, &coeff) in self.coeffs.iter().enumerate() {
+            if coeff == 0 {
+                continue;
+            }
+
+            let mapped = (index * galois_element) % modulus_2n;
+            if mapped < n {
+                result[mapped] = add_mod(result[mapped], coeff, self.modulus);
+            } else {
+                result[mapped - n] = sub_mod(result[mapped - n], coeff, self.modulus);
+            }
+        }
+
+        Self::new(result, self.modulus)
+    }
+
     //This is the standard used polynomial multiplication in all the library
     //It uses the fundamental relation: a(x)b(x) = NTT^{-1}(NTT(a) pointwise_mult NTT(b))
     pub fn multiply_ntt(&self, other: &Self, plan: &NttPlan) -> Self {
@@ -197,5 +221,15 @@ mod tests {
         let actual = lhs.multiply_ntt(&rhs, &plan);
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn galois_automorphism_matches_x_to_x_power_m() {
+        let modulus = 17;
+        let poly = ModularPolynomial::new(vec![1, 2, 3, 4], modulus);
+
+        let automorphed = poly.apply_galois_automorphism(3);
+
+        assert_eq!(automorphed.coeffs(), &[1, 13, 2, 14]);
     }
 }

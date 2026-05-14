@@ -134,6 +134,15 @@ impl RnsPolynomial {
         Self { residues }
     }
 
+    pub fn apply_galois_automorphism(&self, galois_element: usize) -> Self {
+        let residues = self
+            .residues
+            .iter()
+            .map(|residue| residue.apply_galois_automorphism(galois_element))
+            .collect();
+        Self { residues }
+    }
+
     pub fn drop_last_level(&self) -> Self {
         assert!(self.levels() > 1, "cannot drop the last RNS level");
         let mut residues = self.residues.clone();
