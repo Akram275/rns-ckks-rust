@@ -1,10 +1,12 @@
 use num_bigint::{BigInt, Sign};
 use num_traits::Zero;
 
-use super::basis::RnsContext;
+use super::basis::{mod_inv_u64, RnsContext};
 use super::ciphertexts::{RnsCiphertext, RnsQuadraticCiphertext};
 use super::keys::{sample_error_poly, sample_ternary_poly, RnsPublicKey, RnsSecretKey};
 use super::polynomial::{mod_q_biguint_to_centered, RnsPolynomial};
+use crate::poly::ModularPolynomial;
+use rayon::prelude::*;
 
 pub(crate) fn encrypt_rns(
     plaintext: &RnsPolynomial,
@@ -72,24 +74,11 @@ pub(crate) fn rescale_ciphertext_rns(ciphertext: &RnsCiphertext, context: &RnsCo
         .at_level(context.levels() - 1)
         .expect("dropped level context must exist");
     let dropped_prime = context.primes().last().expect("rescale requires a last prime").modulus;
-    let dropped_prime_bigint = BigInt::from(dropped_prime);
     let dropped_prime_bits = (u64::BITS as usize - 1) - dropped_prime.leading_zeros() as usize;
 
-    let rescale_poly = |poly: &RnsPolynomial| {
-        let coeffs = poly.reconstruct_coefficients(context);
-        let rounded: Vec<BigInt> = coeffs
-            .iter()
-            .map(|coeff| {
-                let centered = mod_q_biguint_to_centered(coeff, &context.total_modulus());
-                div_round_nearest(&centered, &dropped_prime_bigint)
-            })
-            .collect();
-        dropped_context.poly_from_bigint_coeffs(&rounded)
-    };
-
     RnsCiphertext {
-        c0: rescale_poly(&ciphertext.c0),
-        c1: rescale_poly(&ciphertext.c1),
+        c0: rescale_poly_rns(&ciphertext.c0, context, &dropped_context, dropped_prime),
+        c1: rescale_poly_rns(&ciphertext.c1, context, &dropped_context, dropped_prime),
         scale_bits: ciphertext.scale_bits.saturating_sub(dropped_prime_bits),
         level: ciphertext.level - 1,
     }
@@ -135,27 +124,76 @@ pub(crate) fn rescale_quadratic_ciphertext_rns(
         .at_level(context.levels() - 1)
         .expect("dropped quadratic level context must exist");
     let dropped_prime = context.primes().last().expect("quadratic rescale requires a last prime").modulus;
-    let dropped_prime_bigint = BigInt::from(dropped_prime);
     let dropped_prime_bits = (u64::BITS as usize - 1) - dropped_prime.leading_zeros() as usize;
 
-    let rescale_poly = |poly: &RnsPolynomial| {
-        let coeffs = poly.reconstruct_coefficients(context);
-        let rounded: Vec<BigInt> = coeffs
-            .iter()
-            .map(|coeff| {
-                let centered = mod_q_biguint_to_centered(coeff, &context.total_modulus());
-                div_round_nearest(&centered, &dropped_prime_bigint)
-            })
-            .collect();
-        dropped_context.poly_from_bigint_coeffs(&rounded)
-    };
-
     RnsQuadraticCiphertext {
-        c0: rescale_poly(&ciphertext.c0),
-        c1: rescale_poly(&ciphertext.c1),
-        c2: rescale_poly(&ciphertext.c2),
+        c0: rescale_poly_rns(&ciphertext.c0, context, &dropped_context, dropped_prime),
+        c1: rescale_poly_rns(&ciphertext.c1, context, &dropped_context, dropped_prime),
+        c2: rescale_poly_rns(&ciphertext.c2, context, &dropped_context, dropped_prime),
         scale_bits: ciphertext.scale_bits.saturating_sub(dropped_prime_bits),
         level: ciphertext.level - 1,
+    }
+}
+
+fn rescale_poly_rns(
+    poly: &RnsPolynomial,
+    context: &RnsContext,
+    dropped_context: &RnsContext,
+    dropped_prime: u64,
+) -> RnsPolynomial {
+    let dropped_coeffs = poly.residues().last().expect("rescale requires a dropped residue").coeffs();
+    let dropped_half = dropped_prime >> 1;
+
+    let residues = poly
+        .residues()
+        .par_iter()
+        .take(dropped_context.levels())
+        .zip(dropped_context.primes().par_iter())
+        .map(|(residue, prime)| {
+            let q_i = prime.modulus;
+            let dropped_prime_mod_q_i = dropped_prime % q_i;
+            let dropped_prime_inv = mod_inv_u64(dropped_prime_mod_q_i, q_i)
+                .expect("dropped prime must be invertible modulo the surviving basis");
+            let coeffs: Vec<u64> = residue
+                .coeffs()
+                .iter()
+                .zip(dropped_coeffs.iter())
+                .map(|(&coeff, &dropped_coeff)| {
+                    let centered_dropped_mod_q_i = centered_residue_mod_prime(
+                        dropped_coeff,
+                        dropped_prime,
+                        dropped_half,
+                        q_i,
+                    );
+                    let numerator = sub_mod_u64(coeff, centered_dropped_mod_q_i, q_i);
+                    ((numerator as u128 * dropped_prime_inv as u128) % q_i as u128) as u64
+                })
+                .collect();
+            ModularPolynomial::new(coeffs, q_i)
+        })
+        .collect();
+
+    RnsPolynomial::new(dropped_context, residues)
+}
+
+fn centered_residue_mod_prime(value: u64, modulus: u64, half: u64, target_modulus: u64) -> u64 {
+    if value <= half {
+        value % target_modulus
+    } else {
+        let distance = (modulus - value) % target_modulus;
+        if distance == 0 {
+            0
+        } else {
+            target_modulus - distance
+        }
+    }
+}
+
+fn sub_mod_u64(lhs: u64, rhs: u64, modulus: u64) -> u64 {
+    if lhs >= rhs {
+        lhs - rhs
+    } else {
+        modulus - (rhs - lhs)
     }
 }
 
