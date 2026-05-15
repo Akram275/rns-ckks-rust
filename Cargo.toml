@@ -14,8 +14,8 @@ num-traits = "0.2"
 rand = "0.8"
 # Distributions for random sampling (Gaussian errors)
 rand_distr = "0.4"
-# For parallel computation (useful later for NTT)
-# rayon = "1.8"  # Uncomment when using newer Rust
+# For parallel computation over RNS limbs and keyswitch digits
+rayon = "=1.8.1"
 # Arbitrary precision integers (for testing/validation)
 num-bigint = "0.4"
 

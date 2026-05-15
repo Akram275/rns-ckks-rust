@@ -1,6 +1,7 @@
 use crate::poly::ModularPolynomial;
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::{ToPrimitive, Zero};
+use rayon::prelude::*;
 
 use super::basis::{mod_inv_u64, RnsContext};
 
@@ -99,8 +100,8 @@ impl RnsPolynomial {
         self.assert_compatible(other);
         let residues = self
             .residues
-            .iter()
-            .zip(other.residues.iter())
+            .par_iter()
+            .zip(other.residues.par_iter())
             .map(|(lhs, rhs)| lhs.add(rhs))
             .collect();
         Self { residues }
@@ -110,8 +111,8 @@ impl RnsPolynomial {
         self.assert_compatible(other);
         let residues = self
             .residues
-            .iter()
-            .zip(other.residues.iter())
+            .par_iter()
+            .zip(other.residues.par_iter())
             .map(|(lhs, rhs)| lhs.sub(rhs))
             .collect();
         Self { residues }
@@ -126,9 +127,9 @@ impl RnsPolynomial {
         );
         let residues = self
             .residues
-            .iter()
-            .zip(other.residues.iter())
-            .zip(context.ntt_plans().iter())
+            .par_iter()
+            .zip(other.residues.par_iter())
+            .zip(context.ntt_plans().par_iter())
             .map(|((lhs, rhs), plan)| lhs.multiply_ntt(rhs, plan))
             .collect();
         Self { residues }
@@ -137,7 +138,7 @@ impl RnsPolynomial {
     pub fn apply_galois_automorphism(&self, galois_element: usize) -> Self {
         let residues = self
             .residues
-            .iter()
+            .par_iter()
             .map(|residue| residue.apply_galois_automorphism(galois_element))
             .collect();
         Self { residues }
@@ -166,11 +167,10 @@ impl RnsPolynomial {
         );
 
         let total_modulus = context.total_modulus();
-        let mut coeffs = Vec::with_capacity(context.poly_degree());
-
-        for coeff_index in 0..context.poly_degree() {
-            let mut acc = BigUint::zero();
-            for (residue, prime) in self.residues.iter().zip(context.primes()) {
+        let crt_terms: Vec<(BigUint, BigUint)> = context
+            .primes()
+            .iter()
+            .map(|prime| {
                 let modulus_big = BigUint::from(prime.modulus);
                 let partial = &total_modulus / &modulus_big;
                 let partial_mod = (&partial % &modulus_big)
@@ -178,15 +178,26 @@ impl RnsPolynomial {
                     .expect("partial modulus reduction must fit in u64");
                 let inverse = mod_inv_u64(partial_mod, prime.modulus)
                     .expect("RNS moduli must be pairwise coprime");
-                let term = BigUint::from(residue.coeffs()[coeff_index])
-                    * &partial
-                    * BigUint::from(inverse);
-                acc += term;
-            }
-            coeffs.push(acc % &total_modulus);
-        }
+                (partial, BigUint::from(inverse))
+            })
+            .collect();
 
-        coeffs
+        (0..context.poly_degree())
+            .into_par_iter()
+            .map(|coeff_index| {
+                let mut acc = BigUint::zero();
+                for ((residue, _prime), (partial, inverse)) in self
+                    .residues
+                    .iter()
+                    .zip(context.primes())
+                    .zip(crt_terms.iter())
+                {
+                    let term = BigUint::from(residue.coeffs()[coeff_index]) * partial * inverse;
+                    acc += term;
+                }
+                acc % &total_modulus
+            })
+            .collect()
     }
 
     fn assert_compatible(&self, other: &Self) {
