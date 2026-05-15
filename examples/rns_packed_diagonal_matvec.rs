@@ -1,7 +1,8 @@
 use ckks::algorithms::packed_diagonal::{
-    generate_packed_diagonal_matrix_vector_rotation_keys,
-    plaintext_matrix_ciphertext_vector_product,
-    repeat_real_vector_in_slots,
+    generate_packed_diagonal_rotation_keys,
+    pack_diagonal_plaintexts,
+    packed_diagonal_matvec_prepacked,
+    repeat_real_vector_blocks,
 };
 use ckks::rns::{RnsCkksContext, RnsCkksParams};
 
@@ -22,20 +23,21 @@ fn main() {
         .map(|row| row.iter().zip(vector.iter()).map(|(lhs, rhs)| lhs * rhs).sum())
         .collect();
 
-    let packed_vector = repeat_real_vector_in_slots(&vector, context.num_slots());
+    let packed_vector = repeat_real_vector_blocks(&vector, context.num_slots());
     let ciphertext = context.encrypt(&context.encode_real(&packed_vector), &key_pair.public_key);
-    let rotation_keys = generate_packed_diagonal_matrix_vector_rotation_keys(
+    let rotation_keys = generate_packed_diagonal_rotation_keys(
         &context,
         &key_pair.secret_key,
         &key_pair.public_key,
         ciphertext.level,
         matrix.len(),
     );
+    let diagonals = pack_diagonal_plaintexts(&context, &matrix, ciphertext.level, ciphertext.scale_bits);
 
-    let product = plaintext_matrix_ciphertext_vector_product(
+    let product = packed_diagonal_matvec_prepacked(
         &context,
         &ciphertext,
-        &matrix,
+        &diagonals,
         &rotation_keys,
     );
     let recovered = context.decode_real_at_scale(
@@ -43,7 +45,8 @@ fn main() {
         product.scale_bits,
     );
 
-    println!("RNS CKKS packed-diagonal plaintext-matrix encrypted-vector product");
+    println!("RNS CKKS matrix-local packed-diagonal plaintext-matrix encrypted-vector product");
+    println!("packing: matrix diagonals occupy the first n slots, encrypted vector repeats blockwise");
     println!("expected first block = {:?}", expected);
     println!("recovered first block = {:?}", &recovered[..matrix.len()]);
 }

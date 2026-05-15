@@ -1,8 +1,18 @@
+//! Halevi-Shoup plaintext-ciphertext dot product.
+//!
+//! Packing contract:
+//! - the encrypted vector occupies the first `active_slots` slots,
+//! - the plaintext vector is provided as a standard real slice and is padded
+//!   with zeros to the full CKKS slot count,
+//! - the output is a rotated-and-summed ciphertext whose slot `0` contains the
+//!   dot product, while the remaining active slots contain the same scalar under
+//!   the usual binary fold pattern.
+
 use std::collections::BTreeMap;
 
 use crate::rns::{RnsCkksContext, RnsCiphertext, RnsPublicKey, RnsRotationKey, RnsSecretKey};
 
-pub fn plaintext_ciphertext_dot_product_rotation_steps(active_slots: usize) -> Vec<usize> {
+pub fn halevi_shoup_dot_product_rotation_steps(active_slots: usize) -> Vec<usize> {
     assert!(active_slots > 0, "active_slots must be positive");
 
     let mut steps = Vec::new();
@@ -15,14 +25,14 @@ pub fn plaintext_ciphertext_dot_product_rotation_steps(active_slots: usize) -> V
     steps
 }
 
-pub fn generate_plaintext_ciphertext_dot_product_rotation_keys(
+pub fn generate_halevi_shoup_dot_product_rotation_keys(
     context: &RnsCkksContext,
     secret_key: &RnsSecretKey,
     public_key: &RnsPublicKey,
     level: usize,
     active_slots: usize,
 ) -> BTreeMap<usize, RnsRotationKey> {
-    plaintext_ciphertext_dot_product_rotation_steps(active_slots)
+    halevi_shoup_dot_product_rotation_steps(active_slots)
         .into_iter()
         .map(|step| {
             (
@@ -33,7 +43,7 @@ pub fn generate_plaintext_ciphertext_dot_product_rotation_keys(
         .collect()
 }
 
-pub fn plaintext_ciphertext_dot_product(
+pub fn halevi_shoup_dot_product(
     context: &RnsCkksContext,
     ciphertext: &RnsCiphertext,
     plaintext_slots: &[f64],
@@ -49,7 +59,7 @@ pub fn plaintext_ciphertext_dot_product(
     padded_slots[..plaintext_slots.len()].copy_from_slice(plaintext_slots);
 
     let mut accumulator = context.mult_plain_slots_real(ciphertext, &padded_slots);
-    for step in plaintext_ciphertext_dot_product_rotation_steps(plaintext_slots.len()) {
+    for step in halevi_shoup_dot_product_rotation_steps(plaintext_slots.len()) {
         let rotation_key = rotation_keys
             .get(&step)
             .unwrap_or_else(|| panic!("missing rotation key for step {step}"));
@@ -63,21 +73,21 @@ pub fn plaintext_ciphertext_dot_product(
 #[cfg(test)]
 mod tests {
     use super::{
-        generate_plaintext_ciphertext_dot_product_rotation_keys,
-        plaintext_ciphertext_dot_product,
-        plaintext_ciphertext_dot_product_rotation_steps,
+        generate_halevi_shoup_dot_product_rotation_keys,
+        halevi_shoup_dot_product,
+        halevi_shoup_dot_product_rotation_steps,
     };
     use crate::rns::{RnsCkksContext, RnsCkksParams};
 
     #[test]
-    fn plaintext_ciphertext_dot_product_steps_follow_powers_of_two() {
-        assert_eq!(plaintext_ciphertext_dot_product_rotation_steps(1), Vec::<usize>::new());
-        assert_eq!(plaintext_ciphertext_dot_product_rotation_steps(4), vec![1, 2]);
-        assert_eq!(plaintext_ciphertext_dot_product_rotation_steps(5), vec![1, 2, 4]);
+    fn halevi_shoup_dot_product_rotation_steps_follow_powers_of_two() {
+        assert_eq!(halevi_shoup_dot_product_rotation_steps(1), Vec::<usize>::new());
+        assert_eq!(halevi_shoup_dot_product_rotation_steps(4), vec![1, 2]);
+        assert_eq!(halevi_shoup_dot_product_rotation_steps(5), vec![1, 2, 4]);
     }
 
     #[test]
-    fn plaintext_ciphertext_dot_product_matches_expected_scalar_on_realistic_params() {
+    fn halevi_shoup_dot_product_matches_expected_scalar_on_realistic_params() {
         let context = RnsCkksContext::new(RnsCkksParams::realistic_8_level())
             .expect("realistic RNS CKKS params must build");
         let key_pair = context.keygen(64);
@@ -92,7 +102,7 @@ mod tests {
         let mut padded_encrypted_slots = vec![0.0_f64; context.num_slots()];
         padded_encrypted_slots[..encrypted_slots.len()].copy_from_slice(&encrypted_slots);
         let ciphertext = context.encrypt(&context.encode_real(&padded_encrypted_slots), &key_pair.public_key);
-        let rotation_keys = generate_plaintext_ciphertext_dot_product_rotation_keys(
+        let rotation_keys = generate_halevi_shoup_dot_product_rotation_keys(
             &context,
             &key_pair.secret_key,
             &key_pair.public_key,
@@ -100,7 +110,7 @@ mod tests {
             plaintext_slots.len(),
         );
 
-        let dot_product = plaintext_ciphertext_dot_product(
+        let dot_product = halevi_shoup_dot_product(
             &context,
             &ciphertext,
             &plaintext_slots,

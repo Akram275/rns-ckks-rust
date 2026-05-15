@@ -1,6 +1,6 @@
 use ckks::algorithms::halevi_shoup::{
-    generate_plaintext_ciphertext_dot_product_rotation_keys,
-    plaintext_ciphertext_dot_product,
+    generate_halevi_shoup_dot_product_rotation_keys,
+    halevi_shoup_dot_product,
 };
 use ckks::rns::{RnsCkksContext, RnsCkksParams};
 
@@ -20,7 +20,7 @@ fn main() {
     let mut padded_encrypted_slots = vec![0.0_f64; context.num_slots()];
     padded_encrypted_slots[..encrypted_slots.len()].copy_from_slice(&encrypted_slots);
     let ciphertext = context.encrypt(&context.encode_real(&padded_encrypted_slots), &key_pair.public_key);
-    let rotation_keys = generate_plaintext_ciphertext_dot_product_rotation_keys(
+    let rotation_keys = generate_halevi_shoup_dot_product_rotation_keys(
         &context,
         &key_pair.secret_key,
         &key_pair.public_key,
@@ -28,7 +28,7 @@ fn main() {
         plaintext_slots.len(),
     );
 
-    let dot_product = plaintext_ciphertext_dot_product(
+    let dot_product = halevi_shoup_dot_product(
         &context,
         &ciphertext,
         &plaintext_slots,
@@ -40,6 +40,7 @@ fn main() {
     );
 
     println!("RNS CKKS Halevi-Shoup plaintext-ciphertext dot product");
+    println!("packing: encrypted vector in the leading active slots, plaintext vector zero-padded");
     println!("expected scalar = {expected}");
     println!("slot[0] output = {}", recovered[0]);
 }
