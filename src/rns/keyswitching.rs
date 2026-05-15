@@ -235,29 +235,6 @@ pub(crate) fn decompose_poly_rns_with_levels(
         .collect()
 }
 
-pub(crate) fn balanced_digits_bigint(value: &BigInt, levels: usize, decomp_bits: usize) -> Vec<i64> {
-    let base_i64 = 1i64 << decomp_bits;
-    let half_i64 = base_i64 >> 1;
-    let base = BigInt::from(base_i64);
-    let mut current = value.clone();
-    let mut digits = Vec::with_capacity(levels);
-
-    for _ in 0..levels {
-        let mut digit = (&current % &base)
-            .to_i64()
-            .expect("decomposition digit must fit in i64");
-        if digit >= half_i64 {
-            digit -= base_i64;
-        } else if digit < -half_i64 {
-            digit += base_i64;
-        }
-        digits.push(digit);
-        current = (current - BigInt::from(digit)) / &base;
-    }
-
-    digits
-}
-
 pub(crate) fn num_decomp_digits(total_modulus_bits: u64, decomp_bits: usize) -> usize {
     (total_modulus_bits as usize + decomp_bits - 1) / decomp_bits
 }
@@ -385,18 +362,6 @@ impl BasisConversionPrecomp {
     }
 }
 
-fn convert_residues_to_targets(
-    residues: &[u64],
-    precomp: &BasisConversionPrecomp,
-    target_moduli: &[u64],
-) -> Vec<u64> {
-    let mixed = mixed_radix_digits(residues, precomp);
-    target_moduli
-        .iter()
-        .map(|&target_modulus| evaluate_mixed_radix_mod(&mixed, &precomp.moduli, target_modulus))
-        .collect()
-}
-
 fn convert_centered_residues_to_target(
     residues: &[u64],
     precomp: &BasisConversionPrecomp,
@@ -436,7 +401,7 @@ fn mixed_radix_digits(residues: &[u64], precomp: &BasisConversionPrecomp) -> Vec
         let modulus = precomp.moduli[i];
         let mut value = digits[i];
         for j in 0..i {
-            value = sub_mod_u64(value, digits[j], modulus);
+            value = sub_mod_u64(value, digits[j] % modulus, modulus);
             value = mul_mod_u64(value, precomp.inverses[i][j], modulus);
         }
         digits[i] = value;
@@ -582,6 +547,8 @@ fn add_mod_u64(lhs: u64, rhs: u64, modulus: u64) -> u64 {
 }
 
 fn sub_mod_u64(lhs: u64, rhs: u64, modulus: u64) -> u64 {
+    let lhs = lhs % modulus;
+    let rhs = rhs % modulus;
     if lhs >= rhs {
         lhs - rhs
     } else {

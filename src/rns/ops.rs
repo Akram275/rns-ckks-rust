@@ -1,10 +1,7 @@
-use num_bigint::{BigInt, Sign};
-use num_traits::Zero;
-
 use super::basis::{mod_inv_u64, RnsContext};
 use super::ciphertexts::{RnsCiphertext, RnsQuadraticCiphertext};
 use super::keys::{sample_error_poly, sample_ternary_poly, RnsPublicKey, RnsSecretKey};
-use super::polynomial::{mod_q_biguint_to_centered, RnsPolynomial};
+use super::polynomial::RnsPolynomial;
 use crate::poly::ModularPolynomial;
 use rayon::prelude::*;
 
@@ -77,8 +74,8 @@ pub(crate) fn rescale_ciphertext_rns(ciphertext: &RnsCiphertext, context: &RnsCo
     let dropped_prime_bits = (u64::BITS as usize - 1) - dropped_prime.leading_zeros() as usize;
 
     RnsCiphertext {
-        c0: rescale_poly_rns(&ciphertext.c0, context, &dropped_context, dropped_prime),
-        c1: rescale_poly_rns(&ciphertext.c1, context, &dropped_context, dropped_prime),
+        c0: rescale_poly_rns(&ciphertext.c0, &dropped_context, dropped_prime),
+        c1: rescale_poly_rns(&ciphertext.c1, &dropped_context, dropped_prime),
         scale_bits: ciphertext.scale_bits.saturating_sub(dropped_prime_bits),
         level: ciphertext.level - 1,
     }
@@ -127,9 +124,9 @@ pub(crate) fn rescale_quadratic_ciphertext_rns(
     let dropped_prime_bits = (u64::BITS as usize - 1) - dropped_prime.leading_zeros() as usize;
 
     RnsQuadraticCiphertext {
-        c0: rescale_poly_rns(&ciphertext.c0, context, &dropped_context, dropped_prime),
-        c1: rescale_poly_rns(&ciphertext.c1, context, &dropped_context, dropped_prime),
-        c2: rescale_poly_rns(&ciphertext.c2, context, &dropped_context, dropped_prime),
+        c0: rescale_poly_rns(&ciphertext.c0, &dropped_context, dropped_prime),
+        c1: rescale_poly_rns(&ciphertext.c1, &dropped_context, dropped_prime),
+        c2: rescale_poly_rns(&ciphertext.c2, &dropped_context, dropped_prime),
         scale_bits: ciphertext.scale_bits.saturating_sub(dropped_prime_bits),
         level: ciphertext.level - 1,
     }
@@ -137,7 +134,6 @@ pub(crate) fn rescale_quadratic_ciphertext_rns(
 
 fn rescale_poly_rns(
     poly: &RnsPolynomial,
-    context: &RnsContext,
     dropped_context: &RnsContext,
     dropped_prime: u64,
 ) -> RnsPolynomial {
@@ -194,15 +190,5 @@ fn sub_mod_u64(lhs: u64, rhs: u64, modulus: u64) -> u64 {
         lhs - rhs
     } else {
         modulus - (rhs - lhs)
-    }
-}
-
-pub(crate) fn div_round_nearest(value: &BigInt, divisor: &BigInt) -> BigInt {
-    assert!(divisor > &BigInt::zero(), "divisor must be positive");
-    let half = divisor >> 1usize;
-    if value.sign() == Sign::Minus {
-        (value - &half) / divisor
-    } else {
-        (value + &half) / divisor
     }
 }
