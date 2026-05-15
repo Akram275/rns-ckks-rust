@@ -72,4 +72,20 @@ impl RnsCkksContext {
     pub fn level_context(&self, level: usize) -> Result<RnsContext, String> {
         self.rns_context.at_level(level + 1)
     }
+
+    pub fn eval_key_level_context(&self, level: usize) -> Result<RnsContext, String> {
+        if self.params.aux_primes.is_empty() {
+            return Err("eval-key level context requires an auxiliary basis".to_string());
+        }
+        if level >= self.params.primes.len() {
+            return Err(format!(
+                "level must be in 0..{}, got {level}",
+                self.params.primes.len()
+            ));
+        }
+
+        let mut primes = self.params.primes[..level + 1].to_vec();
+        primes.extend(self.params.aux_primes.clone());
+        RnsContext::new(self.params.poly_degree, primes)
+    }
 }

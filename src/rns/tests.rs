@@ -3,6 +3,7 @@ use super::keys::sample_error_poly;
 use super::keyswitching::{num_decomp_digits, RnsKeySwitchingKey};
 use super::ops::encrypt_rns_with_samples;
 use super::{galois_element_for_rotation, RnsCkksContext, RnsCkksParams, RnsCiphertext, RnsContext, RnsPolynomial, RnsPrime, RnsRotationKey, RnsSecretKey, RNS_DECOMP_BITS};
+use num_bigint::{BigInt, Sign};
 use num_bigint::BigUint;
 use num_complex::Complex64;
 
@@ -60,6 +61,54 @@ fn noiseless_rotation_key(ctx: &RnsCkksContext, secret_key: &RnsSecretKey, steps
             ksk,
             decomp_bits: RNS_DECOMP_BITS,
             level: context.levels() - 1,
+            aux_level_count: 0,
+        },
+    }
+}
+
+fn noiseless_hybrid_rotation_key_at_level(
+    ctx: &RnsCkksContext,
+    secret_key: &RnsSecretKey,
+    steps: isize,
+    level: usize,
+) -> RnsRotationKey {
+    let galois_element = ctx.galois_element_for_rotation(steps);
+    let source = secret_key
+        .apply_galois_automorphism(galois_element)
+        .poly
+        .truncate_levels(level + 1);
+    let q_context = ctx.level_context(level).expect("Q level context must exist");
+    let eval_key_context = ctx
+        .eval_key_level_context(level)
+        .expect("eval-key level context must exist");
+    let aux_modulus = eval_key_context.total_modulus() / q_context.total_modulus();
+    let aux_level_count = eval_key_context.levels() - q_context.levels();
+    let digits = num_decomp_digits(q_context.total_modulus_bits(), RNS_DECOMP_BITS);
+    let mut base_power = BigInt::from(1u64);
+    let base = BigInt::from(1u64) << RNS_DECOMP_BITS;
+    let q_modulus = q_context.total_modulus();
+    let aux_modulus_bigint = BigInt::from_biguint(Sign::Plus, aux_modulus);
+    let source_coeffs = source.reconstruct_coefficients(&q_context);
+    let zero = eval_key_context.zero_poly();
+    let mut ksk = Vec::with_capacity(digits);
+
+    for _ in 0..digits {
+        let coeffs: Vec<BigInt> = source_coeffs
+            .iter()
+            .map(|coeff| super::polynomial::mod_q_biguint_to_centered(coeff, &q_modulus) * &base_power * &aux_modulus_bigint)
+            .collect();
+        let plaintext = eval_key_context.poly_from_bigint_coeffs(&coeffs);
+        ksk.push(RnsCiphertext::new(plaintext, zero.clone(), 0));
+        base_power *= &base;
+    }
+
+    RnsRotationKey {
+        galois_element,
+        keyswitch_key: RnsKeySwitchingKey {
+            ksk,
+            decomp_bits: RNS_DECOMP_BITS,
+            level,
+            aux_level_count,
         },
     }
 }
@@ -338,7 +387,6 @@ fn ciphertext_rotation_with_keyswitch_decrypts_under_original_secret_key() {
 }
 
 #[test]
-#[ignore = "Q-only generated rotation keys are not yet numerically stable at realistic parameters"]
 fn realistic_generated_rotation_key_rotates_under_original_secret_key() {
     let ctx = RnsCkksContext::new(RnsCkksParams::realistic_8_level())
         .expect("realistic RNS CKKS params must build");
@@ -358,7 +406,128 @@ fn realistic_generated_rotation_key_rotates_under_original_secret_key() {
     assert!(approx_eq(recovered[0], slots[1], 2e-2), "expected {:?}, got {:?}", slots[1], recovered[0]);
     assert!(approx_eq(recovered[1], slots[2], 2e-2), "expected {:?}, got {:?}", slots[2], recovered[1]);
     assert!(approx_eq(recovered[2], slots[3], 2e-2), "expected {:?}, got {:?}", slots[3], recovered[2]);
-    assert!(approx_eq(recovered[3], slots[0], 2e-2), "expected {:?}, got {:?}", slots[0], recovered[3]);
+    assert!(approx_eq(recovered[3], Complex64::new(0.0, 0.0), 2e-2), "expected zero, got {:?}", recovered[3]);
+    assert!(approx_eq(recovered[ctx.num_slots() - 1], slots[0], 2e-2), "expected {:?}, got {:?}", slots[0], recovered[ctx.num_slots() - 1]);
+}
+
+#[test]
+fn noiseless_hybrid_rotation_key_rotates_under_original_secret_key() {
+    let ctx = RnsCkksContext::new(RnsCkksParams::realistic_8_level())
+        .expect("realistic RNS CKKS params must build");
+    let pair = ctx.keygen(64);
+    let rotation_key = noiseless_hybrid_rotation_key_at_level(&ctx, &pair.secret_key, 1, 7);
+
+    let mut slots = vec![Complex64::new(0.0, 0.0); ctx.num_slots()];
+    slots[0] = Complex64::new(1.0, 0.0);
+    slots[1] = Complex64::new(2.0, 0.0);
+    slots[2] = Complex64::new(3.0, 0.0);
+    slots[3] = Complex64::new(4.0, 0.0);
+
+    let ciphertext = ctx.encrypt(&ctx.encode(&slots), &pair.public_key);
+    let rotated = ctx.rotate(&ciphertext, &rotation_key);
+    let recovered = ctx.decode(&ctx.decrypt(&rotated, &pair.secret_key));
+
+    assert!(approx_eq(recovered[0], slots[1], 2e-2), "expected {:?}, got {:?}", slots[1], recovered[0]);
+    assert!(approx_eq(recovered[1], slots[2], 2e-2), "expected {:?}, got {:?}", slots[2], recovered[1]);
+    assert!(approx_eq(recovered[2], slots[3], 2e-2), "expected {:?}, got {:?}", slots[3], recovered[2]);
+    assert!(approx_eq(recovered[3], Complex64::new(0.0, 0.0), 2e-2), "expected zero, got {:?}", recovered[3]);
+    assert!(approx_eq(recovered[ctx.num_slots() - 1], slots[0], 2e-2), "expected {:?}, got {:?}", slots[0], recovered[ctx.num_slots() - 1]);
+}
+
+#[test]
+fn noiseless_hybrid_keyswitch_recovers_source_product() {
+    let ctx = RnsCkksContext::new(RnsCkksParams::realistic_8_level())
+        .expect("realistic RNS CKKS params must build");
+    let pair = ctx.keygen(64);
+    let rotation_key = noiseless_hybrid_rotation_key_at_level(&ctx, &pair.secret_key, 1, 7);
+    let q_context = ctx.level_context(7).expect("Q level context must exist");
+    let source = pair
+        .secret_key
+        .apply_galois_automorphism(rotation_key.galois_element)
+        .poly
+        .truncate_levels(8);
+    let input = q_context.poly_from_coeffs(&[1, 2, 3, 4]);
+
+    let switched = ctx.keyswitch(&input, &rotation_key.keyswitch_key);
+    let recovered = ctx.decrypt(&switched, &pair.secret_key);
+    let expected = input.multiply_ntt(&source, &q_context);
+
+    assert_eq!(recovered, expected);
+}
+
+#[test]
+fn noiseless_hybrid_keyswitch_recovers_rotated_ciphertext_component_product() {
+    let ctx = RnsCkksContext::new(RnsCkksParams::realistic_8_level())
+        .expect("realistic RNS CKKS params must build");
+    let pair = ctx.keygen(64);
+    let rotation_key = noiseless_hybrid_rotation_key_at_level(&ctx, &pair.secret_key, 1, 7);
+    let source = pair
+        .secret_key
+        .apply_galois_automorphism(rotation_key.galois_element)
+        .poly
+        .truncate_levels(8);
+
+    let mut slots = vec![Complex64::new(0.0, 0.0); ctx.num_slots()];
+    slots[0] = Complex64::new(1.0, 0.0);
+    slots[1] = Complex64::new(2.0, 0.0);
+    slots[2] = Complex64::new(3.0, 0.0);
+    slots[3] = Complex64::new(4.0, 0.0);
+
+    let ciphertext = ctx.encrypt(&ctx.encode(&slots), &pair.public_key);
+    let raw_rotated = ctx.rotate_raw(&ciphertext, 1);
+    let q_context = ctx.level_context(raw_rotated.level).expect("rotation level context must exist");
+
+    let switched = ctx.keyswitch(&raw_rotated.c1, &rotation_key.keyswitch_key);
+    let recovered = ctx.decrypt(&switched, &pair.secret_key);
+    let expected = raw_rotated.c1.multiply_ntt(&source, &q_context);
+
+    assert_eq!(recovered, expected);
+}
+
+#[test]
+fn realistic_raw_ciphertext_rotation_decrypts_under_rotated_secret_key() {
+    let ctx = RnsCkksContext::new(RnsCkksParams::realistic_8_level())
+        .expect("realistic RNS CKKS params must build");
+    let pair = ctx.keygen(64);
+
+    let mut slots = vec![Complex64::new(0.0, 0.0); ctx.num_slots()];
+    slots[0] = Complex64::new(1.0, 0.0);
+    slots[1] = Complex64::new(2.0, 0.0);
+    slots[2] = Complex64::new(3.0, 0.0);
+    slots[3] = Complex64::new(4.0, 0.0);
+
+    let ciphertext = ctx.encrypt(&ctx.encode(&slots), &pair.public_key);
+    let rotated_ct = ctx.rotate_raw(&ciphertext, 1);
+    let rotated_sk = ctx.rotate_secret_key_raw(&pair.secret_key, 1);
+    let recovered = ctx.decode(&ctx.decrypt(&rotated_ct, &rotated_sk));
+
+    assert!(approx_eq(recovered[0], slots[1], 2e-2), "expected {:?}, got {:?}", slots[1], recovered[0]);
+    assert!(approx_eq(recovered[1], slots[2], 2e-2), "expected {:?}, got {:?}", slots[2], recovered[1]);
+    assert!(approx_eq(recovered[2], slots[3], 2e-2), "expected {:?}, got {:?}", slots[3], recovered[2]);
+    assert!(approx_eq(recovered[3], Complex64::new(0.0, 0.0), 2e-2), "expected zero, got {:?}", recovered[3]);
+    assert!(approx_eq(recovered[ctx.num_slots() - 1], slots[0], 2e-2), "expected {:?}, got {:?}", slots[0], recovered[ctx.num_slots() - 1]);
+}
+
+#[test]
+fn realistic_raw_plain_rotation_matches_slot_shift() {
+    let ctx = RnsCkksContext::new(RnsCkksParams::realistic_8_level())
+        .expect("realistic RNS CKKS params must build");
+
+    let mut slots = vec![Complex64::new(0.0, 0.0); ctx.num_slots()];
+    slots[0] = Complex64::new(1.0, 0.0);
+    slots[1] = Complex64::new(2.0, 0.0);
+    slots[2] = Complex64::new(3.0, 0.0);
+    slots[3] = Complex64::new(4.0, 0.0);
+
+    let plaintext = ctx.encode(&slots);
+    let rotated = ctx.rotate_plain_raw(&plaintext, 1);
+    let recovered = ctx.decode(&rotated);
+
+    assert!(approx_eq(recovered[0], slots[1], 2e-2), "expected {:?}, got {:?}", slots[1], recovered[0]);
+    assert!(approx_eq(recovered[1], slots[2], 2e-2), "expected {:?}, got {:?}", slots[2], recovered[1]);
+    assert!(approx_eq(recovered[2], slots[3], 2e-2), "expected {:?}, got {:?}", slots[3], recovered[2]);
+    assert!(approx_eq(recovered[3], Complex64::new(0.0, 0.0), 2e-2), "expected zero, got {:?}", recovered[3]);
+    assert!(approx_eq(recovered[ctx.num_slots() - 1], slots[0], 2e-2), "expected {:?}, got {:?}", slots[0], recovered[ctx.num_slots() - 1]);
 }
 
 #[test]

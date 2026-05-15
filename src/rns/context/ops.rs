@@ -1,7 +1,7 @@
 use num_complex::Complex64;
 
 use super::{RnsCkksContext, RnsCiphertext, RnsKeySwitchingKey, RnsPolynomial, RnsPublicKey, RnsQuadraticCiphertext, RnsSecretKey};
-use crate::rns::keyswitching::keyswitch_rns;
+use crate::rns::keyswitching::{keyswitch_rns, keyswitch_rns_hybrid};
 use crate::rns::ops::{decrypt_quadratic_rns, decrypt_rns, encrypt_rns, multiply_ciphertexts_rns, multiply_plain_rns, rescale_ciphertext_rns, rescale_quadratic_ciphertext_rns};
 
 impl RnsCkksContext {
@@ -47,6 +47,19 @@ impl RnsCkksContext {
         self.mult_plain_slots(ciphertext, &complex_slots)
     }
 
+    pub fn mult_plain_slots_preserve_scale(&self, ciphertext: &RnsCiphertext, plain_slots: &[Complex64]) -> RnsCiphertext {
+        let plain = self.encode_at_level_and_scale(plain_slots, ciphertext.level, 0);
+        let context = self
+            .level_context(ciphertext.level)
+            .expect("ciphertext level context must exist for plaintext multiplication");
+        multiply_plain_rns(ciphertext, &plain, &context)
+    }
+
+    pub fn mult_plain_slots_real_preserve_scale(&self, ciphertext: &RnsCiphertext, plain_slots: &[f64]) -> RnsCiphertext {
+        let complex_slots: Vec<Complex64> = plain_slots.iter().map(|&value| Complex64::new(value, 0.0)).collect();
+        self.mult_plain_slots_preserve_scale(ciphertext, &complex_slots)
+    }
+
     pub fn mult(&self, lhs: &RnsCiphertext, rhs: &RnsCiphertext) -> RnsQuadraticCiphertext {
         assert_eq!(lhs.level, rhs.level, "ciphertexts must be at the same level to multiply");
         assert_eq!(lhs.scale_bits, rhs.scale_bits, "ciphertexts must share the same scale to multiply");
@@ -82,10 +95,17 @@ impl RnsCkksContext {
     }
 
     pub fn keyswitch(&self, poly: &RnsPolynomial, ksk: &RnsKeySwitchingKey) -> RnsCiphertext {
-        let context = self
+        let q_context = self
             .level_context(poly.levels() - 1)
             .expect("keyswitch level context must exist");
-        keyswitch_rns(poly, ksk, &context)
+        if ksk.aux_level_count == 0 {
+            keyswitch_rns(poly, ksk, &q_context)
+        } else {
+            let eval_key_context = self
+                .eval_key_level_context(poly.levels() - 1)
+                .expect("hybrid keyswitching requires an eval-key level context");
+            keyswitch_rns_hybrid(poly, ksk, &q_context, &eval_key_context)
+        }
     }
 
     pub fn relinearize(
