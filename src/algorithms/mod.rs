@@ -5,4 +5,5 @@
 //! rotations and plaintext masks.
 
 pub mod halevi_shoup;
+pub mod paterson_stockmeyer;
 pub mod packed_diagonal;
