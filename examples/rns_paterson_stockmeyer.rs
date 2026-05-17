@@ -9,7 +9,7 @@ fn main() {
         .expect("realistic RNS CKKS parameters must build");
     let key_pair = context.keygen(64);
 
-    let coefficients = [0.75_f64, -0.5];
+    let coefficients = [0.75_f64, -0.5, 1.25, -0.25, 0.125];
     let input = [0.125_f64, -0.2, 0.05, 0.3];
     let expected: Vec<f64> = input
         .iter()

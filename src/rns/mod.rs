@@ -6,7 +6,7 @@ mod context;
 mod encoding;
 mod keys;
 mod keyswitching;
-mod ops;
+pub(crate) mod ops;
 mod polynomial;
 mod rotation;
 
