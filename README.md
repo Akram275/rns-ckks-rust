@@ -33,3 +33,7 @@ cargo run --example rns_hadamard_product
 - `src/poly/`: modular polynomial arithmetic
 - `examples/`: realistic RNS examples
 - `tests/`: integration tests for math primitives
+
+## License
+
+This project is licensed under the MIT License. See the LICENSE file for details.

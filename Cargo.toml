@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Akram"]
 description = "A Rust implementation of RNS-CKKS homomorphic encryption"
+license = "MIT"
 
 [dependencies]
 # Complex number support for CKKS encoding/decoding
