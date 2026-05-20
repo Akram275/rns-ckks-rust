@@ -34,12 +34,7 @@ fn main() {
     );
     let diagonals = pack_diagonal_plaintexts(&context, &matrix, ciphertext.level, ciphertext.scale_bits);
 
-    let product = packed_diagonal_matvec_prepacked(
-        &context,
-        &ciphertext,
-        &diagonals,
-        &rotation_keys,
-    );
+    let product = packed_diagonal_matvec_prepacked(&context, &ciphertext, &diagonals, &rotation_keys);
     let recovered = context.decode_real_at_scale(
         &context.decrypt(&product, &key_pair.secret_key),
         product.scale_bits,

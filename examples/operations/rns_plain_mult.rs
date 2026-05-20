@@ -1,9 +1,8 @@
 use ckks::rns::{RnsCkksContext, RnsCkksParams};
 
-
-
 pub fn main() {
-    let context = RnsCkksContext::new(RnsCkksParams::realistic_8_level()).expect("realistic RNS CKKS parameters must build");
+    let context = RnsCkksContext::new(RnsCkksParams::realistic_8_level())
+        .expect("realistic RNS CKKS parameters must build");
     let key_pair = context.keygen(64);
     let mut enc_slots = vec![0.0_f64; context.num_slots()];
     enc_slots[0] = 0.125;
@@ -16,7 +15,7 @@ pub fn main() {
     plain_slots[1] = 2.0;
     plain_slots[2] = 2.0;
     plain_slots[3] = 2.0;
-    
+
     let plain_encoded = context.encode_real(&plain_slots);
     let ciphertext = context.encrypt(&context.encode_real(&enc_slots), &key_pair.public_key);
     let product = context.mult_plain(&ciphertext, &plain_encoded);
@@ -35,4 +34,4 @@ pub fn main() {
             recovered[index]
         );
     }
-}    
+}

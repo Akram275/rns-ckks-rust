@@ -17,7 +17,11 @@ fn main() {
     let decrypted = context.decrypt(&ciphertext, &key_pair.secret_key);
     let recovered = context.decode(&decrypted);
 
-    println!("RNS CKKS round trip with N = {} and log2(Q) ~= {}", context.params().poly_degree, context.total_modulus_bits());
+    println!(
+        "RNS CKKS round trip with N = {} and log2(Q) ~= {}",
+        context.params().poly_degree,
+        context.total_modulus_bits()
+    );
     for index in 0..4 {
         println!(
             "slot[{index}] input = {:?}, output = {:?}",

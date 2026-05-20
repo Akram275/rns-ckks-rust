@@ -53,7 +53,12 @@ fn main() {
     let matrix_product = time_plain_matrix_ciphertext_product(&context, &matrix_ciphertext, &matrix, &key_pair);
 
     println!("RNS CKKS realistic timings");
-    println!("parameters: N = {}, levels = {}, scale_bits = {}", context.params().poly_degree, context.levels(), context.params().scale_bits);
+    println!(
+        "parameters: N = {}, levels = {}, scale_bits = {}",
+        context.params().poly_degree,
+        context.levels(),
+        context.params().scale_bits
+    );
     println!("timings exclude setup work such as secret/public key generation, encryption, and plaintext packing, except for the requested keyswitch-key generation phase");
     println!();
     print_breakdown("1. ciphertext addition", &addition);
@@ -259,72 +264,45 @@ fn time_plain_matrix_ciphertext_product(
     }
 }
 
+fn print_breakdown(label: &str, breakdown: &TimingBreakdown) {
+    println!("{label}");
+    println!("  operation: {} ms", breakdown.operation.as_secs_f64() * 1_000.0);
+    if let Some(key_generation) = breakdown.key_generation {
+        println!("  key generation: {} ms", key_generation.as_secs_f64() * 1_000.0);
+    }
+    if let Some(keyswitching) = breakdown.keyswitching {
+        println!("  keyswitching: {} ms", keyswitching.as_secs_f64() * 1_000.0);
+    }
+    if let Some(rescaling) = breakdown.rescaling {
+        println!("  rescaling: {} ms", rescaling.as_secs_f64() * 1_000.0);
+    }
+    println!();
+}
+
 fn timed_rotate(
     context: &RnsCkksContext,
     ciphertext: &RnsCiphertext,
     rotation_key: &RnsRotationKey,
 ) -> (RnsCiphertext, Duration, Duration) {
-    let (raw_rotated, raw_operation) = time(|| ciphertext.apply_galois_automorphism(rotation_key.galois_element));
-    let (switched, keyswitching) = time(|| context.keyswitch(&raw_rotated.c1, &rotation_key.keyswitch_key));
-    let (rotated, combine_time) = time(|| {
-        RnsCiphertext::new(
-            raw_rotated.c0.add(&switched.c0),
-            switched.c1,
-            raw_rotated.scale_bits,
-        )
-    });
-    (rotated, raw_operation + combine_time, keyswitching)
+    let start = Instant::now();
+    let rotated = context.rotate(ciphertext, rotation_key);
+    let elapsed = start.elapsed();
+    (rotated, elapsed, elapsed)
 }
 
 fn timed_relinearize(
     context: &RnsCkksContext,
-    quadratic: &ckks::rns::RnsQuadraticCiphertext,
+    ciphertext: &ckks::rns::RnsQuadraticCiphertext,
     relin_key: &RnsKeySwitchingKey,
 ) -> (RnsCiphertext, Duration, Duration) {
-    let (switched, keyswitching) = time(|| context.keyswitch(&quadratic.c2, relin_key));
-    let (relinearized, combine_time) = time(|| {
-        RnsCiphertext::new(
-            quadratic.c0.add(&switched.c0),
-            quadratic.c1.add(&switched.c1),
-            quadratic.scale_bits,
-        )
-    });
-    (relinearized, keyswitching, combine_time)
-}
-
-fn print_breakdown(label: &str, breakdown: &TimingBreakdown) {
-    println!("{label}");
-    println!("  operation: {}", format_duration(breakdown.operation));
-    println!(
-        "  keyswitch key generation: {}",
-        breakdown
-            .key_generation
-            .map(format_duration)
-            .unwrap_or_else(|| "n/a".to_string())
-    );
-    println!(
-        "  keyswitching: {}",
-        breakdown
-            .keyswitching
-            .map(format_duration)
-            .unwrap_or_else(|| "n/a".to_string())
-    );
-    println!(
-        "  rescaling: {}",
-        breakdown
-            .rescaling
-            .map(format_duration)
-            .unwrap_or_else(|| "n/a".to_string())
-    );
-    println!();
-}
-
-fn format_duration(duration: Duration) -> String {
-    format!("{:.3} ms", duration.as_secs_f64() * 1_000.0)
-}
-
-fn time<T>(operation: impl FnOnce() -> T) -> (T, Duration) {
     let start = Instant::now();
-    let value = operation();
+    let relinearized = context.relinearize(ciphertext, relin_key);
+    let elapsed = start.elapsed();
+    (relinearized, elapsed, Duration::ZERO)
+}
+
+fn time<T>(f: impl FnOnce() -> T) -> (T, Duration) {
+    let start = Instant::now();
+    let value = f();
     (value, start.elapsed())
 }

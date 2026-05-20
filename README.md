@@ -24,14 +24,21 @@ cargo test -- --nocapture
 cargo run --example rns_round_trip
 cargo run --example rns_addition
 cargo run --example rns_hadamard_product
+cargo run --example rns_halevi_shoup_dot_product
+cargo run --example rns_packed_diagonal_matvec
+cargo run --example rns_paterson_stockmeyer
+cargo run --example timings
 ```
 
 ## Layout
 
 - `src/rns/`: RNS CKKS implementation
+- `src/algorithms/`: higher-level encrypted linear algebra and polynomial evaluation
 - `src/math/`: NTT and canonical embedding helpers
 - `src/poly/`: modular polynomial arithmetic
-- `examples/`: realistic RNS examples
+- `examples/operations/`: core CKKS operation examples
+- `examples/algorithmics/`: higher-level CKKS algorithm examples
+- `examples/ML/`: placeholder for upcoming ML-oriented examples
 - `tests/`: integration tests for math primitives
 
 ## License

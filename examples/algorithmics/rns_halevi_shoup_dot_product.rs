@@ -28,12 +28,7 @@ fn main() {
         plaintext_slots.len(),
     );
 
-    let dot_product = halevi_shoup_dot_product(
-        &context,
-        &ciphertext,
-        &plaintext_slots,
-        &rotation_keys,
-    );
+    let dot_product = halevi_shoup_dot_product(&context, &ciphertext, &plaintext_slots, &rotation_keys);
     let recovered = context.decode_real_at_scale(
         &context.decrypt(&dot_product, &key_pair.secret_key),
         dot_product.scale_bits,

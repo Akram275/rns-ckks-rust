@@ -31,3 +31,35 @@ num-bigint = "0.4"
 [profile.release]
 opt-level = 3
 lto = true
+
+[[example]]
+name = "rns_round_trip"
+path = "examples/operations/rns_round_trip.rs"
+
+[[example]]
+name = "rns_addition"
+path = "examples/operations/rns_addition.rs"
+
+[[example]]
+name = "rns_hadamard_product"
+path = "examples/operations/rns_hadamard_product.rs"
+
+[[example]]
+name = "rns_plain_mult"
+path = "examples/operations/rns_plain_mult.rs"
+
+[[example]]
+name = "timings"
+path = "examples/operations/timings.rs"
+
+[[example]]
+name = "rns_halevi_shoup_dot_product"
+path = "examples/algorithmics/rns_halevi_shoup_dot_product.rs"
+
+[[example]]
+name = "rns_packed_diagonal_matvec"
+path = "examples/algorithmics/rns_packed_diagonal_matvec.rs"
+
+[[example]]
+name = "rns_paterson_stockmeyer"
+path = "examples/algorithmics/rns_paterson_stockmeyer.rs"
