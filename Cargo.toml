@@ -63,3 +63,11 @@ path = "examples/algorithmics/rns_packed_diagonal_matvec.rs"
 [[example]]
 name = "rns_paterson_stockmeyer"
 path = "examples/algorithmics/rns_paterson_stockmeyer.rs"
+
+[[example]]
+name = "ml_linear_regression"
+path = "examples/ML/ml_linear_regression.rs"
+
+[[example]]
+name = "ml_logistic_regression"
+path = "examples/ML/ml_logistic_regression.rs"
