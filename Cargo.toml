@@ -71,3 +71,7 @@ path = "examples/ML/ml_linear_regression.rs"
 [[example]]
 name = "ml_logistic_regression"
 path = "examples/ML/ml_logistic_regression.rs"
+
+[[example]]
+name = "ml_binary_svm"
+path = "examples/ML/ml_binary_svm.rs"
