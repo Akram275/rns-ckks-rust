@@ -5,7 +5,7 @@ mod ciphertexts;
 mod context;
 mod encoding;
 mod keys;
-mod keyswitching;
+pub(crate) mod keyswitching;
 pub(crate) mod ops;
 mod polynomial;
 mod rotation;
