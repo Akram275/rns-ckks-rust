@@ -27,6 +27,7 @@ cargo run --example rns_hadamard_product
 cargo run --example rns_halevi_shoup_dot_product
 cargo run --example rns_packed_diagonal_matvec
 cargo run --example rns_paterson_stockmeyer
+cargo run --example rns_total_sum
 cargo run --example timings
 ```
 
