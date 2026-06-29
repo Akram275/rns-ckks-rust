@@ -4,4 +4,9 @@
 //! CKKS bootstrapping, starting from the canonical ModRaise -> CoeffToSlot ->
 //! EvalMod -> SlotToCoeff decomposition.
 
+pub mod keys;
 pub mod mod_raise;
+pub mod params;
+
+pub use keys::BootstrapKeySet;
+pub use params::BootstrapParameters;
