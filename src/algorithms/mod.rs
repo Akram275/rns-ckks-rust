@@ -7,3 +7,4 @@
 pub mod halevi_shoup;
 pub mod paterson_stockmeyer;
 pub mod packed_diagonal;
+pub mod total_sum;
