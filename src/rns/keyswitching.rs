@@ -239,7 +239,7 @@ pub(crate) fn num_decomp_digits(total_modulus_bits: u64, decomp_bits: usize) -> 
     (total_modulus_bits as usize + decomp_bits - 1) / decomp_bits
 }
 
-fn lift_poly_to_context(poly: &RnsPolynomial, source_context: &RnsContext, target_context: &RnsContext) -> RnsPolynomial {
+pub(crate) fn lift_poly_to_context(poly: &RnsPolynomial, source_context: &RnsContext, target_context: &RnsContext) -> RnsPolynomial {
     assert!(target_context.levels() >= source_context.levels(), "target context must extend the source basis");
     let source_moduli: Vec<u64> = source_context.primes().iter().map(|prime| prime.modulus).collect();
     let target_moduli: Vec<u64> = target_context.primes()[source_context.levels()..]
