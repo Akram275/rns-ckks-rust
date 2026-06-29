@@ -1,9 +1,5 @@
 use std::time::{Duration, Instant};
 
-use ckks::algorithms::halevi_shoup::{
-    generate_halevi_shoup_dot_product_rotation_keys,
-    halevi_shoup_dot_product_rotation_steps,
-};
 use ckks::algorithms::packed_diagonal::{
     generate_packed_diagonal_rotation_keys,
     pack_diagonal_plaintexts,
@@ -15,7 +11,8 @@ use ckks::algorithms::paterson_stockmeyer::{
     paterson_stockmeyer_block_size,
     paterson_stockmeyer_eval,
 };
-use ckks::rns::{RnsCiphertext, RnsCkksContext, RnsCkksParams, RnsRotationKey};
+use ckks::algorithms::total_sum::{generate_total_sum_rotation_keys, total_sum};
+use ckks::rns::{RnsCiphertext, RnsCkksContext, RnsCkksParams};
 
 const FEATURE_DIM: usize = 6;
 const SUPPORT_VECTOR_COUNT: usize = 50;
@@ -68,7 +65,7 @@ fn main() {
     let matvec_key_time = matvec_key_start.elapsed();
 
     let linear_sum_key_start = Instant::now();
-    let linear_sum_rotation_keys = generate_halevi_shoup_dot_product_rotation_keys(
+    let linear_sum_rotation_keys = generate_total_sum_rotation_keys(
         &context,
         &key_pair.secret_key,
         &key_pair.public_key,
@@ -89,7 +86,7 @@ fn main() {
     let relin_key_time = relin_key_start.elapsed();
     let nonlinear_level = paterson_stockmeyer_output_level(query_ciphertext.level - 1, ps_poly.len());
     let nonlinear_sum_key_start = Instant::now();
-    let nonlinear_sum_rotation_keys = generate_halevi_shoup_dot_product_rotation_keys(
+    let nonlinear_sum_rotation_keys = generate_total_sum_rotation_keys(
         &context,
         &key_pair.secret_key,
         &key_pair.public_key,
@@ -148,13 +145,13 @@ fn timed_linear_kernel_svm(
     query_ciphertext: &RnsCiphertext,
     diagonals: &ckks::algorithms::packed_diagonal::PackedDiagonalPlaintexts,
     matvec_rotation_keys: &ckks::algorithms::packed_diagonal::PackedDiagonalRotationKeys,
-    sum_rotation_keys: &std::collections::BTreeMap<usize, RnsRotationKey>,
+    sum_rotation_keys: &std::collections::BTreeMap<usize, ckks::rns::RnsRotationKey>,
     label_mask: &[f64],
 ) -> KernelRun {
     let start = Instant::now();
     let dot_products = packed_diagonal_matvec_prepacked(context, query_ciphertext, diagonals, matvec_rotation_keys);
     let weighted = apply_slot_weights(context, &dot_products, label_mask);
-    let accumulator = total_sum_slots(context, &weighted, PADDED_SUPPORT_VECTOR_COUNT, sum_rotation_keys);
+    let accumulator = total_sum(context, &weighted, PADDED_SUPPORT_VECTOR_COUNT, sum_rotation_keys);
     KernelRun {
         ciphertext: accumulator,
         elapsed: start.elapsed(),
@@ -166,7 +163,7 @@ fn timed_sigmoid_kernel_svm(
     query_ciphertext: &RnsCiphertext,
     diagonals: &ckks::algorithms::packed_diagonal::PackedDiagonalPlaintexts,
     matvec_rotation_keys: &ckks::algorithms::packed_diagonal::PackedDiagonalRotationKeys,
-    sum_rotation_keys: &std::collections::BTreeMap<usize, RnsRotationKey>,
+    sum_rotation_keys: &std::collections::BTreeMap<usize, ckks::rns::RnsRotationKey>,
     label_mask: &[f64],
     relin_keys: &std::collections::BTreeMap<usize, ckks::rns::RnsKeySwitchingKey>,
     sigmoid_polynomial: &[f64],
@@ -175,7 +172,7 @@ fn timed_sigmoid_kernel_svm(
     let dot_products = packed_diagonal_matvec_prepacked(context, query_ciphertext, diagonals, matvec_rotation_keys);
     let kernel_values = paterson_stockmeyer_eval(context, &dot_products, sigmoid_polynomial, relin_keys);
     let weighted = apply_slot_weights(context, &kernel_values, label_mask);
-    let accumulator = total_sum_slots(context, &weighted, PADDED_SUPPORT_VECTOR_COUNT, sum_rotation_keys);
+    let accumulator = total_sum(context, &weighted, PADDED_SUPPORT_VECTOR_COUNT, sum_rotation_keys);
     KernelRun {
         ciphertext: accumulator,
         elapsed: start.elapsed(),
@@ -187,7 +184,7 @@ fn timed_polynomial_kernel_svm(
     query_ciphertext: &RnsCiphertext,
     diagonals: &ckks::algorithms::packed_diagonal::PackedDiagonalPlaintexts,
     matvec_rotation_keys: &ckks::algorithms::packed_diagonal::PackedDiagonalRotationKeys,
-    sum_rotation_keys: &std::collections::BTreeMap<usize, RnsRotationKey>,
+    sum_rotation_keys: &std::collections::BTreeMap<usize, ckks::rns::RnsRotationKey>,
     label_mask: &[f64],
     relin_keys: &std::collections::BTreeMap<usize, ckks::rns::RnsKeySwitchingKey>,
 ) -> KernelRun {
@@ -196,7 +193,7 @@ fn timed_polynomial_kernel_svm(
     let dot_products = packed_diagonal_matvec_prepacked(context, query_ciphertext, diagonals, matvec_rotation_keys);
     let kernel_values = paterson_stockmeyer_eval(context, &dot_products, &cubic_polynomial, relin_keys);
     let weighted = apply_slot_weights(context, &kernel_values, label_mask);
-    let accumulator = total_sum_slots(context, &weighted, PADDED_SUPPORT_VECTOR_COUNT, sum_rotation_keys);
+    let accumulator = total_sum(context, &weighted, PADDED_SUPPORT_VECTOR_COUNT, sum_rotation_keys);
     KernelRun {
         ciphertext: accumulator,
         elapsed: start.elapsed(),
@@ -205,23 +202,6 @@ fn timed_polynomial_kernel_svm(
 
 fn apply_slot_weights(context: &RnsCkksContext, ciphertext: &RnsCiphertext, weights: &[f64]) -> RnsCiphertext {
     context.mult_plain_slots_real_preserve_scale(ciphertext, weights)
-}
-
-fn total_sum_slots(
-    context: &RnsCkksContext,
-    ciphertext: &RnsCiphertext,
-    active_slots: usize,
-    rotation_keys: &std::collections::BTreeMap<usize, RnsRotationKey>,
-) -> RnsCiphertext {
-    let mut accumulator = ciphertext.clone();
-    for step in halevi_shoup_dot_product_rotation_steps(active_slots) {
-        let rotation_key = rotation_keys
-            .get(&step)
-            .unwrap_or_else(|| panic!("missing total-sum rotation key for step {step}"));
-        let rotated = context.rotate(&accumulator, rotation_key);
-        accumulator = accumulator.add(&rotated);
-    }
-    accumulator
 }
 
 fn decrypt_slot_zero(
@@ -327,10 +307,6 @@ fn paterson_stockmeyer_output_level(ciphertext_level: usize, term_count: usize) 
     let block_count = term_count.div_ceil(block_size);
     let top_level = ciphertext_level - (block_size - 1);
     top_level - (block_count - 1)
-}
-
-fn constant_slots(slot_count: usize, value: f64) -> Vec<f64> {
-    vec![value; slot_count]
 }
 
 fn print_kernel_result(name: &str, expected: f64, recovered: f64, elapsed: Duration) {
