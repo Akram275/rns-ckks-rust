@@ -65,6 +65,10 @@ name = "rns_paterson_stockmeyer"
 path = "examples/algorithmics/rns_paterson_stockmeyer.rs"
 
 [[example]]
+name = "rns_total_sum"
+path = "examples/algorithmics/rns_total_sum.rs"
+
+[[example]]
 name = "ml_linear_regression"
 path = "examples/ML/ml_linear_regression.rs"
 
