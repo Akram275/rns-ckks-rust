@@ -10,8 +10,10 @@
 //! - the eventual `coeff_to_slot(...)` evaluator entry point.
 
 use crate::ckks::bootstrapping::linear_transform::{
+	apply_diagonal_linear_transform,
 	diagonal_transform_rotation_steps,
 	pack_diagonal_transform_plaintexts,
+	DiagonalTransformRotationKeys,
 	DiagonalTransformPlaintexts,
 };
 use crate::ckks::bootstrapping::BootstrapParameters;
@@ -103,6 +105,21 @@ impl CoeffToSlotRuntime {
 	}
 }
 
+pub fn coeff_to_slot(
+	context: &RnsCkksContext,
+	ciphertext: &RnsCiphertext,
+	precomputed: &CoeffToSlotPrecomputed,
+	rotation_keys: &DiagonalTransformRotationKeys,
+) -> Result<RnsCiphertext, String> {
+	let _runtime = CoeffToSlotRuntime::new(precomputed.plan.clone(), ciphertext)?;
+	Ok(apply_diagonal_linear_transform(
+		context,
+		ciphertext,
+		&precomputed.diagonals,
+		rotation_keys,
+	))
+}
+
 fn validate_transform_matrix(matrix: &[Vec<f64>], expected_dimension: usize) -> Result<(), String> {
 	if matrix.is_empty() {
 		return Err("CoeffToSlot transform matrix cannot be empty".to_string());
@@ -128,8 +145,9 @@ fn validate_transform_matrix(matrix: &[Vec<f64>], expected_dimension: usize) -> 
 
 #[cfg(test)]
 mod tests {
-	use super::{CoeffToSlotPlan, CoeffToSlotPrecomputed, CoeffToSlotRuntime};
+	use super::{coeff_to_slot, CoeffToSlotPlan, CoeffToSlotPrecomputed, CoeffToSlotRuntime};
 	use crate::ckks::bootstrapping::BootstrapParameters;
+	use crate::ckks::bootstrapping::linear_transform::{generate_diagonal_transform_rotation_keys, repeat_block_slots};
 	use crate::rns::{RnsCkksContext, RnsCkksParams};
 
 	#[test]
@@ -207,5 +225,55 @@ mod tests {
 		)
 		.expect_err("dimension mismatch must be rejected");
 		assert!(error.contains("did not match plan dimension"));
+	}
+
+	#[test]
+	fn coeff_to_slot_executes_precomputed_identity_transform() {
+		let context = RnsCkksContext::new(RnsCkksParams::realistic_8_level())
+			.expect("realistic RNS CKKS params must build");
+		let key_pair = context.keygen(64);
+
+		let input = vec![0.5_f64, -0.25, 0.125, 0.75, -0.5, 0.25, -0.125, 0.375];
+		let packed = repeat_block_slots(&input, context.num_slots());
+		let ciphertext = context.encrypt(&context.encode_real(&packed), &key_pair.public_key);
+		let plan = CoeffToSlotPlan::from_ciphertext(&context, &ciphertext, input.len())
+			.expect("plan construction must succeed");
+
+		let identity: Vec<Vec<f64>> = (0..input.len())
+			.map(|row| {
+				(0..input.len())
+					.map(|col| if row == col { 1.0 } else { 0.0 })
+					.collect()
+			})
+			.collect();
+		let precomputed = CoeffToSlotPrecomputed::new(
+			&context,
+			plan,
+			&identity,
+			ciphertext.scale_bits,
+		)
+		.expect("precomputation must succeed");
+		let rotation_keys = generate_diagonal_transform_rotation_keys(
+			&context,
+			&key_pair.secret_key,
+			&key_pair.public_key,
+			ciphertext.level,
+			input.len(),
+		);
+
+		let transformed = coeff_to_slot(&context, &ciphertext, &precomputed, &rotation_keys)
+			.expect("CoeffToSlot execution must succeed");
+		let recovered = context.decode_real_at_scale(
+			&context.decrypt(&transformed, &key_pair.secret_key),
+			transformed.scale_bits,
+		);
+
+		for (index, &expected) in input.iter().enumerate() {
+			assert!(
+				(recovered[index] - expected).abs() <= 2e-2,
+				"expected {expected}, got {} at slot {index}",
+				recovered[index]
+			);
+		}
 	}
 }
