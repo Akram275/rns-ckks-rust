@@ -10,28 +10,22 @@
 //! - the first `n` output slots contain the matrix-vector product and the tail
 //!   is expected to stay near zero.
 
-use std::collections::BTreeMap;
+use crate::ckks::bootstrapping::linear_transform::{
+    apply_diagonal_linear_transform,
+    diagonal_transform_rotation_steps,
+    generate_diagonal_transform_rotation_keys,
+    pack_diagonal_transform_plaintexts,
+    repeat_block_slots,
+    DiagonalTransformPlaintexts,
+    DiagonalTransformRotationKeys,
+};
+use crate::rns::{RnsCkksContext, RnsCiphertext, RnsPublicKey, RnsSecretKey};
 
-use num_complex::Complex64;
-
-use crate::rns::{RnsCkksContext, RnsCiphertext, RnsPolynomial, RnsPublicKey, RnsRotationKey, RnsSecretKey};
-
-#[derive(Clone, Debug)]
-pub struct PackedDiagonalRotationKeys {
-    pub by_step: BTreeMap<usize, RnsRotationKey>,
-}
-
-#[derive(Clone, Debug)]
-pub struct PackedDiagonalPlaintexts {
-    pub diagonals: Vec<RnsPolynomial>,
-    pub dimension: usize,
-    level: usize,
-    scale_bits: usize,
-}
+pub type PackedDiagonalRotationKeys = DiagonalTransformRotationKeys;
+pub type PackedDiagonalPlaintexts = DiagonalTransformPlaintexts;
 
 pub fn packed_diagonal_rotation_steps(row_count: usize) -> Vec<usize> {
-    assert!(row_count > 0, "matrix row count must be positive");
-    (1..row_count).collect()
+    diagonal_transform_rotation_steps(row_count)
 }
 
 pub fn generate_packed_diagonal_rotation_keys(
@@ -41,25 +35,11 @@ pub fn generate_packed_diagonal_rotation_keys(
     ciphertext_level: usize,
     row_count: usize,
 ) -> PackedDiagonalRotationKeys {
-    let mut by_step = BTreeMap::new();
-    for step in packed_diagonal_rotation_steps(row_count) {
-        by_step.insert(
-            step,
-            context.generate_rotation_key_at_level(secret_key, public_key, step as isize, ciphertext_level),
-        );
-    }
-
-    PackedDiagonalRotationKeys { by_step }
+    generate_diagonal_transform_rotation_keys(context, secret_key, public_key, ciphertext_level, row_count)
 }
 
 pub fn repeat_real_vector_blocks(values: &[f64], slot_count: usize) -> Vec<f64> {
-    assert!(!values.is_empty(), "input vector cannot be empty");
-    assert!(values.len() <= slot_count, "input vector cannot exceed slot count");
-    assert_eq!(slot_count % values.len(), 0, "slot count must be a multiple of the active vector length");
-
-    (0..slot_count)
-        .map(|index| values[index % values.len()])
-        .collect()
+    repeat_block_slots(values, slot_count)
 }
 
 pub fn pack_diagonal_plaintexts(
@@ -68,24 +48,7 @@ pub fn pack_diagonal_plaintexts(
     level: usize,
     scale_bits: usize,
 ) -> PackedDiagonalPlaintexts {
-    let dimension = validate_square_matrix(matrix, context.num_slots());
-    let diagonals = (0..dimension)
-        .map(|step| {
-            let slots = packed_diagonal_slots(matrix, step, context.num_slots());
-            let complex_slots: Vec<Complex64> = slots
-                .into_iter()
-                .map(|value| Complex64::new(value, 0.0))
-                .collect();
-            context.encode_at_level_and_scale(&complex_slots, level, scale_bits)
-        })
-        .collect();
-
-    PackedDiagonalPlaintexts {
-        diagonals,
-        dimension,
-        level,
-        scale_bits,
-    }
+    pack_diagonal_transform_plaintexts(context, matrix, level, scale_bits)
 }
 
 pub fn packed_diagonal_matvec_prepacked(
@@ -94,24 +57,7 @@ pub fn packed_diagonal_matvec_prepacked(
     diagonals: &PackedDiagonalPlaintexts,
     rotation_keys: &PackedDiagonalRotationKeys,
 ) -> RnsCiphertext {
-    assert_eq!(diagonals.level, ciphertext.level, "packed diagonals must match the ciphertext level");
-    assert_eq!(diagonals.scale_bits, ciphertext.scale_bits, "packed diagonals must match the ciphertext scale");
-
-    let initial = context.mult_plain(ciphertext, &diagonals.diagonals[0]);
-    let mut accumulator = context.rescale(&initial);
-
-    for step in packed_diagonal_rotation_steps(diagonals.dimension) {
-        let rotation_key = rotation_keys
-            .by_step
-            .get(&step)
-            .unwrap_or_else(|| panic!("missing input rotation key for step {step}"));
-        let rotated = context.rotate(ciphertext, rotation_key);
-        let term = context.mult_plain(&rotated, &diagonals.diagonals[step]);
-        let term = context.rescale(&term);
-        accumulator = accumulator.add(&term);
-    }
-
-    accumulator
+    apply_diagonal_linear_transform(context, ciphertext, diagonals, rotation_keys)
 }
 
 pub fn packed_diagonal_matvec(
@@ -122,26 +68,6 @@ pub fn packed_diagonal_matvec(
 ) -> RnsCiphertext {
     let diagonals = pack_diagonal_plaintexts(context, matrix, ciphertext.level, ciphertext.scale_bits);
     packed_diagonal_matvec_prepacked(context, ciphertext, &diagonals, rotation_keys)
-}
-
-fn validate_square_matrix(matrix: &[Vec<f64>], slot_count: usize) -> usize {
-    assert!(!matrix.is_empty(), "matrix cannot be empty");
-    let dimension = matrix.len();
-    assert!(dimension.is_power_of_two(), "matrix dimension must be a power of two");
-    assert!(dimension <= slot_count, "matrix dimension cannot exceed slot count");
-    for row in matrix {
-        assert_eq!(row.len(), dimension, "current packed diagonal implementation expects a square matrix");
-    }
-    dimension
-}
-
-fn packed_diagonal_slots(matrix: &[Vec<f64>], diagonal: usize, slot_count: usize) -> Vec<f64> {
-    let dimension = matrix.len();
-    let mut slots = vec![0.0; slot_count];
-    for row in 0..dimension {
-        slots[row] = matrix[row][(diagonal + row) % dimension];
-    }
-    slots
 }
 
 #[cfg(test)]
