@@ -5,8 +5,18 @@
 //! EvalMod -> SlotToCoeff decomposition.
 
 pub mod keys;
+pub mod linear_transform;
 pub mod mod_raise;
 pub mod params;
 
 pub use keys::BootstrapKeySet;
+pub use linear_transform::{
+	apply_diagonal_linear_transform,
+	diagonal_transform_rotation_steps,
+	generate_diagonal_transform_rotation_keys,
+	pack_diagonal_transform_plaintexts,
+	repeat_block_slots,
+	DiagonalTransformPlaintexts,
+	DiagonalTransformRotationKeys,
+};
 pub use params::BootstrapParameters;
