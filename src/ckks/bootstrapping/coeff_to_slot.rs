@@ -11,6 +11,7 @@
 
 use crate::ckks::bootstrapping::linear_transform::{
 	diagonal_transform_rotation_steps,
+	pack_diagonal_transform_plaintexts,
 	DiagonalTransformPlaintexts,
 };
 use crate::ckks::bootstrapping::BootstrapParameters;
@@ -56,6 +57,26 @@ pub struct CoeffToSlotPrecomputed {
 	pub diagonals: DiagonalTransformPlaintexts,
 }
 
+impl CoeffToSlotPrecomputed {
+	pub fn new(
+		context: &RnsCkksContext,
+		plan: CoeffToSlotPlan,
+		matrix: &[Vec<f64>],
+		ciphertext_scale_bits: usize,
+	) -> Result<Self, String> {
+		validate_transform_matrix(matrix, plan.transform_dimension)?;
+
+		let diagonals = pack_diagonal_transform_plaintexts(
+			context,
+			matrix,
+			plan.bootstrap.ciphertext_level,
+			ciphertext_scale_bits,
+		);
+
+		Ok(Self { plan, diagonals })
+	}
+}
+
 /// Runtime configuration for applying a CoeffToSlot transform to a ciphertext.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CoeffToSlotRuntime {
@@ -82,9 +103,32 @@ impl CoeffToSlotRuntime {
 	}
 }
 
+fn validate_transform_matrix(matrix: &[Vec<f64>], expected_dimension: usize) -> Result<(), String> {
+	if matrix.is_empty() {
+		return Err("CoeffToSlot transform matrix cannot be empty".to_string());
+	}
+	if matrix.len() != expected_dimension {
+		return Err(format!(
+			"CoeffToSlot transform matrix dimension {} did not match plan dimension {}",
+			matrix.len(),
+			expected_dimension,
+		));
+	}
+	for (row_index, row) in matrix.iter().enumerate() {
+		if row.len() != expected_dimension {
+			return Err(format!(
+				"CoeffToSlot transform row {row_index} had length {}, expected {}",
+				row.len(),
+				expected_dimension,
+			));
+		}
+	}
+	Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-	use super::{CoeffToSlotPlan, CoeffToSlotRuntime};
+	use super::{CoeffToSlotPlan, CoeffToSlotPrecomputed, CoeffToSlotRuntime};
 	use crate::ckks::bootstrapping::BootstrapParameters;
 	use crate::rns::{RnsCkksContext, RnsCkksParams};
 
@@ -124,5 +168,44 @@ mod tests {
 		let error = CoeffToSlotRuntime::new(plan, &lowered)
 			.expect_err("mismatched level must be rejected");
 		assert!(error.contains("did not match CoeffToSlot plan level"));
+	}
+
+	#[test]
+	fn coeff_to_slot_precompute_validates_and_packs_diagonals() {
+		let context = RnsCkksContext::new(RnsCkksParams::realistic_8_level())
+			.expect("realistic RNS CKKS params must build");
+		let bootstrap = BootstrapParameters::new(&context, 7, 8)
+			.expect("realistic preset must support bootstrap parameters");
+		let plan = CoeffToSlotPlan::new(bootstrap);
+
+		let identity: Vec<Vec<f64>> = (0..8)
+			.map(|row| {
+				(0..8)
+					.map(|col| if row == col { 1.0 } else { 0.0 })
+					.collect()
+			})
+			.collect();
+
+		let precomputed = CoeffToSlotPrecomputed::new(
+			&context,
+			plan.clone(),
+			&identity,
+			context.params().scale_bits,
+		)
+		.expect("identity transform precomputation must succeed");
+
+		assert_eq!(precomputed.plan, plan);
+		assert_eq!(precomputed.diagonals.dimension, 8);
+		assert_eq!(precomputed.diagonals.diagonals.len(), 8);
+
+		let bad_matrix = vec![vec![1.0; 4]; 4];
+		let error = CoeffToSlotPrecomputed::new(
+			&context,
+			precomputed.plan.clone(),
+			&bad_matrix,
+			context.params().scale_bits,
+		)
+		.expect_err("dimension mismatch must be rejected");
+		assert!(error.contains("did not match plan dimension"));
 	}
 }
