@@ -5,12 +5,20 @@
 //! EvalMod -> SlotToCoeff decomposition.
 
 pub mod coeff_to_slot;
+pub mod eval_mod;
 pub mod keys;
 pub mod linear_transform;
 pub mod mod_raise;
 pub mod params;
 pub mod slot_to_coeff;
 
+pub use eval_mod::{
+	eval_mod,
+	sine_taylor_coefficients,
+	EvalModPlan,
+	EvalModPrecomputed,
+	EvalModRuntime,
+};
 pub use keys::BootstrapKeySet;
 pub use linear_transform::{
 	apply_diagonal_linear_transform,
