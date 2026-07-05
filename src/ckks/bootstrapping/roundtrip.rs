@@ -3,6 +3,7 @@ use crate::ckks::bootstrapping::linear_transform::generate_diagonal_transform_ro
 use crate::ckks::bootstrapping::mod_raise::{mod_raise, ModRaisedCiphertext};
 use crate::ckks::bootstrapping::slot_to_coeff::{slot_to_coeff, SlotToCoeffPlan, SlotToCoeffPrecomputed};
 use crate::rns::{RnsCiphertext, RnsCkksContext};
+use num_complex::Complex64;
 
 pub fn bootstrap_identity_roundtrip(
     context: &RnsCkksContext,
@@ -68,11 +69,17 @@ pub fn bootstrap_identity_roundtrip_from_mod_raise(
     )
 }
 
-fn identity_matrix(dimension: usize) -> Vec<Vec<f64>> {
+fn identity_matrix(dimension: usize) -> Vec<Vec<Complex64>> {
     (0..dimension)
         .map(|row| {
             (0..dimension)
-                .map(|col| if row == col { 1.0 } else { 0.0 })
+                .map(|col| {
+                    if row == col {
+                        Complex64::new(1.0, 0.0)
+                    } else {
+                        Complex64::new(0.0, 0.0)
+                    }
+                })
                 .collect()
         })
         .collect()
