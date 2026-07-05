@@ -60,6 +60,47 @@ impl RnsCkksContext {
         }
     }
 
+    pub fn conjugation_galois_element(&self) -> usize {
+        2 * self.params().poly_degree - 1
+    }
+
+    pub fn generate_conjugation_key(
+        &self,
+        secret_key: &RnsSecretKey,
+        public_key: &RnsPublicKey,
+    ) -> RnsRotationKey {
+        let galois_element = self.conjugation_galois_element();
+        let rotated_secret_key = secret_key.apply_galois_automorphism(galois_element);
+        let keyswitch_key = if self.has_aux_basis() {
+            self.generate_eval_keyswitch_key(&rotated_secret_key.poly, secret_key)
+        } else {
+            self.generate_keyswitch_key(&rotated_secret_key.poly, public_key)
+        };
+        RnsRotationKey {
+            galois_element,
+            keyswitch_key,
+        }
+    }
+
+    pub fn generate_conjugation_key_at_level(
+        &self,
+        secret_key: &RnsSecretKey,
+        public_key: &RnsPublicKey,
+        level: usize,
+    ) -> RnsRotationKey {
+        let galois_element = self.conjugation_galois_element();
+        let rotated_secret_key = secret_key.apply_galois_automorphism(galois_element);
+        let keyswitch_key = if self.has_aux_basis() {
+            self.generate_eval_keyswitch_key_at_level(&rotated_secret_key.poly, secret_key, level)
+        } else {
+            self.generate_keyswitch_key_at_level(&rotated_secret_key.poly, public_key, level)
+        };
+        RnsRotationKey {
+            galois_element,
+            keyswitch_key,
+        }
+    }
+
     pub fn rotate(&self, ciphertext: &RnsCiphertext, rotation_key: &RnsRotationKey) -> RnsCiphertext {
         let raw_rotated = ciphertext.apply_galois_automorphism(rotation_key.galois_element);
         assert_eq!(rotation_key.keyswitch_key.level, ciphertext.level, "rotation key level must match the ciphertext level");
@@ -83,6 +124,14 @@ impl RnsCkksContext {
             switched.c1,
             raw_rotated.scale_bits,
         )
+    }
+
+    pub fn conjugate_raw(&self, ciphertext: &RnsCiphertext) -> RnsCiphertext {
+        ciphertext.apply_galois_automorphism(self.conjugation_galois_element())
+    }
+
+    pub fn conjugate(&self, ciphertext: &RnsCiphertext, conjugation_key: &RnsRotationKey) -> RnsCiphertext {
+        self.rotate(ciphertext, conjugation_key)
     }
 
     pub fn rotate_quadratic_raw(

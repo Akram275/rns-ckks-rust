@@ -22,8 +22,12 @@ pub use eval_mod::{
 	EvalModRuntime,
 };
 pub use exact_transforms::{
+	exact_dense_coeff_to_slot_matrices,
+	exact_dense_slot_to_coeff_matrices,
 	exact_coeff_to_slot_matrix,
 	exact_slot_to_coeff_matrix,
+	DenseCoeffToSlotMatrices,
+	DenseSlotToCoeffMatrices,
 };
 pub use keys::BootstrapKeySet;
 pub use linear_transform::{

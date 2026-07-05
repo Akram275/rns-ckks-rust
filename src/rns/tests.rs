@@ -531,6 +531,28 @@ fn realistic_raw_plain_rotation_matches_slot_shift() {
 }
 
 #[test]
+fn realistic_conjugation_matches_slotwise_complex_conjugation() {
+    let ctx = RnsCkksContext::new(RnsCkksParams::realistic_8_level())
+        .expect("realistic RNS CKKS params must build");
+    let pair = ctx.keygen(64);
+    let conjugation_key = ctx.generate_conjugation_key_at_level(&pair.secret_key, &pair.public_key, 7);
+
+    let mut slots = vec![Complex64::new(0.0, 0.0); ctx.num_slots()];
+    slots[0] = Complex64::new(1.0, 0.25);
+    slots[1] = Complex64::new(-2.0, 0.5);
+    slots[2] = Complex64::new(0.75, -1.5);
+    slots[3] = Complex64::new(-0.125, -0.25);
+
+    let ciphertext = ctx.encrypt(&ctx.encode(&slots), &pair.public_key);
+    let conjugated = ctx.conjugate(&ciphertext, &conjugation_key);
+    let recovered = ctx.decode(&ctx.decrypt(&conjugated, &pair.secret_key));
+
+    for (index, expected) in slots.iter().take(4).map(|value| value.conj()).enumerate() {
+        assert!(approx_eq(recovered[index], expected, 2e-2), "expected {:?}, got {:?}", expected, recovered[index]);
+    }
+}
+
+#[test]
 fn sparse_ternary_rns_secret_key_has_expected_weight() {
     let ctx = sample_context();
     let secret_key = RnsSecretKey::sample_sparse_ternary(&ctx, 3);
