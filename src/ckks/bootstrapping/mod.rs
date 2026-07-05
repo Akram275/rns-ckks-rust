@@ -36,7 +36,10 @@ pub use linear_transform::{
 	DiagonalTransformRotationKeys,
 };
 pub use params::BootstrapParameters;
-pub use roundtrip::bootstrap_identity_roundtrip;
+pub use roundtrip::{
+	bootstrap_exact_sparse_eval_mod_roundtrip,
+	bootstrap_identity_roundtrip,
+};
 pub use slot_to_coeff::{
 	slot_to_coeff,
 	SlotToCoeffPlan,
