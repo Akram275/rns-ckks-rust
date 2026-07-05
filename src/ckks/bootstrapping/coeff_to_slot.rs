@@ -9,6 +9,9 @@
 //! - rotation-key requirements for the transform execution,
 //! - the eventual `coeff_to_slot(...)` evaluator entry point.
 
+use num_complex::Complex64;
+
+use crate::ckks::bootstrapping::exact_transforms::exact_coeff_to_slot_matrix;
 use crate::ckks::bootstrapping::linear_transform::{
 	apply_diagonal_linear_transform,
 	diagonal_transform_rotation_steps,
@@ -63,7 +66,7 @@ impl CoeffToSlotPrecomputed {
 	pub fn new(
 		context: &RnsCkksContext,
 		plan: CoeffToSlotPlan,
-		matrix: &[Vec<f64>],
+		matrix: &[Vec<Complex64>],
 		ciphertext_scale_bits: usize,
 	) -> Result<Self, String> {
 		validate_transform_matrix(matrix, plan.transform_dimension)?;
@@ -76,6 +79,15 @@ impl CoeffToSlotPrecomputed {
 		);
 
 		Ok(Self { plan, diagonals })
+	}
+
+	pub fn exact(
+		context: &RnsCkksContext,
+		plan: CoeffToSlotPlan,
+		ciphertext_scale_bits: usize,
+	) -> Result<Self, String> {
+		let matrix = exact_coeff_to_slot_matrix(context, plan.transform_dimension)?;
+		Self::new(context, plan, &matrix, ciphertext_scale_bits)
 	}
 }
 
@@ -120,7 +132,7 @@ pub fn coeff_to_slot(
 	))
 }
 
-fn validate_transform_matrix(matrix: &[Vec<f64>], expected_dimension: usize) -> Result<(), String> {
+fn validate_transform_matrix(matrix: &[Vec<Complex64>], expected_dimension: usize) -> Result<(), String> {
 	if matrix.is_empty() {
 		return Err("CoeffToSlot transform matrix cannot be empty".to_string());
 	}
@@ -147,6 +159,7 @@ fn validate_transform_matrix(matrix: &[Vec<f64>], expected_dimension: usize) -> 
 mod tests {
 	use super::{coeff_to_slot, CoeffToSlotPlan, CoeffToSlotPrecomputed, CoeffToSlotRuntime};
 	use crate::ckks::bootstrapping::BootstrapParameters;
+	use num_complex::Complex64;
 	use crate::ckks::bootstrapping::linear_transform::{generate_diagonal_transform_rotation_keys, repeat_block_slots};
 	use crate::rns::{RnsCkksContext, RnsCkksParams};
 
@@ -196,10 +209,10 @@ mod tests {
 			.expect("realistic preset must support bootstrap parameters");
 		let plan = CoeffToSlotPlan::new(bootstrap);
 
-		let identity: Vec<Vec<f64>> = (0..8)
+		let identity: Vec<Vec<Complex64>> = (0..8)
 			.map(|row| {
 				(0..8)
-					.map(|col| if row == col { 1.0 } else { 0.0 })
+					.map(|col| if row == col { Complex64::new(1.0, 0.0) } else { Complex64::new(0.0, 0.0) })
 					.collect()
 			})
 			.collect();
@@ -216,7 +229,7 @@ mod tests {
 		assert_eq!(precomputed.diagonals.dimension, 8);
 		assert_eq!(precomputed.diagonals.diagonals.len(), 8);
 
-		let bad_matrix = vec![vec![1.0; 4]; 4];
+		let bad_matrix = vec![vec![Complex64::new(1.0, 0.0); 4]; 4];
 		let error = CoeffToSlotPrecomputed::new(
 			&context,
 			precomputed.plan.clone(),
@@ -239,10 +252,10 @@ mod tests {
 		let plan = CoeffToSlotPlan::from_ciphertext(&context, &ciphertext, input.len())
 			.expect("plan construction must succeed");
 
-		let identity: Vec<Vec<f64>> = (0..input.len())
+		let identity: Vec<Vec<Complex64>> = (0..input.len())
 			.map(|row| {
 				(0..input.len())
-					.map(|col| if row == col { 1.0 } else { 0.0 })
+					.map(|col| if row == col { Complex64::new(1.0, 0.0) } else { Complex64::new(0.0, 0.0) })
 					.collect()
 			})
 			.collect();
