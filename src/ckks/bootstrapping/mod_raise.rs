@@ -20,6 +20,10 @@ impl ModRaisedCiphertext {
     pub fn eval_level(&self) -> usize {
         self.ciphertext.level
     }
+
+    pub fn project_to_q_ciphertext(&self) -> RnsCiphertext {
+        self.ciphertext.truncate_levels(self.q_level + 1)
+    }
 }
 
 pub fn mod_raise(context: &RnsCkksContext, ciphertext: &RnsCiphertext) -> ModRaisedCiphertext {
