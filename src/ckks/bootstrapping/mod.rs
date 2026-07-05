@@ -6,6 +6,7 @@
 
 pub mod coeff_to_slot;
 pub mod eval_mod;
+pub mod exact_transforms;
 pub mod keys;
 pub mod linear_transform;
 pub mod mod_raise;
@@ -19,6 +20,10 @@ pub use eval_mod::{
 	EvalModPlan,
 	EvalModPrecomputed,
 	EvalModRuntime,
+};
+pub use exact_transforms::{
+	exact_coeff_to_slot_matrix,
+	exact_slot_to_coeff_matrix,
 };
 pub use keys::BootstrapKeySet;
 pub use linear_transform::{
