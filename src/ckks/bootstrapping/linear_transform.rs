@@ -52,7 +52,7 @@ pub fn repeat_block_slots(values: &[f64], slot_count: usize) -> Vec<f64> {
 
 pub fn pack_diagonal_transform_plaintexts(
     context: &RnsCkksContext,
-    matrix: &[Vec<f64>],
+    matrix: &[Vec<Complex64>],
     level: usize,
     scale_bits: usize,
 ) -> DiagonalTransformPlaintexts {
@@ -60,11 +60,7 @@ pub fn pack_diagonal_transform_plaintexts(
     let diagonals = (0..dimension)
         .map(|step| {
             let slots = packed_diagonal_slots(matrix, step, context.num_slots());
-            let complex_slots: Vec<Complex64> = slots
-                .into_iter()
-                .map(|value| Complex64::new(value, 0.0))
-                .collect();
-            context.encode_at_level_and_scale(&complex_slots, level, scale_bits)
+            context.encode_at_level_and_scale(&slots, level, scale_bits)
         })
         .collect();
 
@@ -102,7 +98,7 @@ pub fn apply_diagonal_linear_transform(
     accumulator
 }
 
-fn validate_square_matrix(matrix: &[Vec<f64>], slot_count: usize) -> usize {
+fn validate_square_matrix(matrix: &[Vec<Complex64>], slot_count: usize) -> usize {
     assert!(!matrix.is_empty(), "matrix cannot be empty");
     let dimension = matrix.len();
     assert!(dimension.is_power_of_two(), "matrix dimension must be a power of two");
@@ -113,9 +109,9 @@ fn validate_square_matrix(matrix: &[Vec<f64>], slot_count: usize) -> usize {
     dimension
 }
 
-fn packed_diagonal_slots(matrix: &[Vec<f64>], diagonal: usize, slot_count: usize) -> Vec<f64> {
+fn packed_diagonal_slots(matrix: &[Vec<Complex64>], diagonal: usize, slot_count: usize) -> Vec<Complex64> {
     let dimension = matrix.len();
-    let mut slots = vec![0.0; slot_count];
+    let mut slots = vec![Complex64::new(0.0, 0.0); slot_count];
     for row in 0..dimension {
         slots[row] = matrix[row][(diagonal + row) % dimension];
     }
@@ -132,6 +128,7 @@ mod tests {
         repeat_block_slots,
     };
     use crate::rns::{RnsCkksContext, RnsCkksParams};
+    use num_complex::Complex64;
 
     #[test]
     fn diagonal_transform_rotation_steps_cover_nonzero_diagonals() {
@@ -145,15 +142,35 @@ mod tests {
             .expect("realistic RNS CKKS params must build");
         let key_pair = context.keygen(64);
         let matrix = vec![
-            vec![1.0, 0.5, -0.25, 0.0],
-            vec![0.0, -1.0, 0.75, 0.25],
-            vec![0.5, 0.0, 1.25, -0.5],
-            vec![-0.25, 0.125, 0.0, 0.75],
+            vec![
+                Complex64::new(1.0, 0.0),
+                Complex64::new(0.5, 0.0),
+                Complex64::new(-0.25, 0.0),
+                Complex64::new(0.0, 0.0),
+            ],
+            vec![
+                Complex64::new(0.0, 0.0),
+                Complex64::new(-1.0, 0.0),
+                Complex64::new(0.75, 0.0),
+                Complex64::new(0.25, 0.0),
+            ],
+            vec![
+                Complex64::new(0.5, 0.0),
+                Complex64::new(0.0, 0.0),
+                Complex64::new(1.25, 0.0),
+                Complex64::new(-0.5, 0.0),
+            ],
+            vec![
+                Complex64::new(-0.25, 0.0),
+                Complex64::new(0.125, 0.0),
+                Complex64::new(0.0, 0.0),
+                Complex64::new(0.75, 0.0),
+            ],
         ];
         let vector = vec![0.5, -0.25, 0.125, 0.75];
         let expected: Vec<f64> = matrix
             .iter()
-            .map(|row| row.iter().zip(vector.iter()).map(|(lhs, rhs)| lhs * rhs).sum())
+            .map(|row| row.iter().zip(vector.iter()).map(|(lhs, rhs)| lhs.re * rhs).sum())
             .collect();
 
         let packed_vector = repeat_block_slots(&vector, context.num_slots());
