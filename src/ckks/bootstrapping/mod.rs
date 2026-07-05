@@ -10,6 +10,7 @@ pub mod keys;
 pub mod linear_transform;
 pub mod mod_raise;
 pub mod params;
+pub mod roundtrip;
 pub mod slot_to_coeff;
 
 pub use eval_mod::{
@@ -30,6 +31,7 @@ pub use linear_transform::{
 	DiagonalTransformRotationKeys,
 };
 pub use params::BootstrapParameters;
+pub use roundtrip::bootstrap_identity_roundtrip;
 pub use slot_to_coeff::{
 	slot_to_coeff,
 	SlotToCoeffPlan,
