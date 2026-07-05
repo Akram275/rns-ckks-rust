@@ -10,6 +10,8 @@
 //! - the first `n` output slots contain the matrix-vector product and the tail
 //!   is expected to stay near zero.
 
+use num_complex::Complex64;
+
 use crate::ckks::bootstrapping::linear_transform::{
     apply_diagonal_linear_transform,
     diagonal_transform_rotation_steps,
@@ -48,7 +50,11 @@ pub fn pack_diagonal_plaintexts(
     level: usize,
     scale_bits: usize,
 ) -> PackedDiagonalPlaintexts {
-    pack_diagonal_transform_plaintexts(context, matrix, level, scale_bits)
+    let complex_matrix: Vec<Vec<Complex64>> = matrix
+        .iter()
+        .map(|row| row.iter().map(|&value| Complex64::new(value, 0.0)).collect())
+        .collect();
+    pack_diagonal_transform_plaintexts(context, &complex_matrix, level, scale_bits)
 }
 
 pub fn packed_diagonal_matvec_prepacked(
