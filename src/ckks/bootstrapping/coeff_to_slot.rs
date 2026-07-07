@@ -11,7 +11,10 @@
 
 use num_complex::Complex64;
 
-use crate::ckks::bootstrapping::exact_transforms::exact_coeff_to_slot_matrix;
+use crate::ckks::bootstrapping::exact_transforms::{
+	exact_coeff_to_slot_matrix,
+	exact_dense_coeff_to_slot_matrices,
+};
 use crate::ckks::bootstrapping::linear_transform::{
 	apply_diagonal_linear_transform,
 	diagonal_transform_rotation_steps,
@@ -62,6 +65,15 @@ pub struct CoeffToSlotPrecomputed {
 	pub diagonals: DiagonalTransformPlaintexts,
 }
 
+#[derive(Clone, Debug)]
+pub struct DenseCoeffToSlotPrecomputed {
+	pub plan: CoeffToSlotPlan,
+	pub upper_from_slots: DiagonalTransformPlaintexts,
+	pub upper_from_conjugates: DiagonalTransformPlaintexts,
+	pub lower_from_slots: DiagonalTransformPlaintexts,
+	pub lower_from_conjugates: DiagonalTransformPlaintexts,
+}
+
 impl CoeffToSlotPrecomputed {
 	pub fn new(
 		context: &RnsCkksContext,
@@ -88,6 +100,69 @@ impl CoeffToSlotPrecomputed {
 	) -> Result<Self, String> {
 		let matrix = exact_coeff_to_slot_matrix(context, plan.transform_dimension)?;
 		Self::new(context, plan, &matrix, ciphertext_scale_bits)
+	}
+}
+
+impl DenseCoeffToSlotPrecomputed {
+	pub fn new(
+		context: &RnsCkksContext,
+		plan: CoeffToSlotPlan,
+		upper_from_slots: &[Vec<Complex64>],
+		upper_from_conjugates: &[Vec<Complex64>],
+		lower_from_slots: &[Vec<Complex64>],
+		lower_from_conjugates: &[Vec<Complex64>],
+		ciphertext_scale_bits: usize,
+	) -> Result<Self, String> {
+		let expected_dimension = context.num_slots();
+		validate_transform_matrix(upper_from_slots, expected_dimension)?;
+		validate_transform_matrix(upper_from_conjugates, expected_dimension)?;
+		validate_transform_matrix(lower_from_slots, expected_dimension)?;
+		validate_transform_matrix(lower_from_conjugates, expected_dimension)?;
+
+		Ok(Self {
+			upper_from_slots: pack_diagonal_transform_plaintexts(
+				context,
+				upper_from_slots,
+				plan.bootstrap.ciphertext_level,
+				ciphertext_scale_bits,
+			),
+			upper_from_conjugates: pack_diagonal_transform_plaintexts(
+				context,
+				upper_from_conjugates,
+				plan.bootstrap.ciphertext_level,
+				ciphertext_scale_bits,
+			),
+			lower_from_slots: pack_diagonal_transform_plaintexts(
+				context,
+				lower_from_slots,
+				plan.bootstrap.ciphertext_level,
+				ciphertext_scale_bits,
+			),
+			lower_from_conjugates: pack_diagonal_transform_plaintexts(
+				context,
+				lower_from_conjugates,
+				plan.bootstrap.ciphertext_level,
+				ciphertext_scale_bits,
+			),
+			plan,
+		})
+	}
+
+	pub fn exact(
+		context: &RnsCkksContext,
+		plan: CoeffToSlotPlan,
+		ciphertext_scale_bits: usize,
+	) -> Result<Self, String> {
+		let matrices = exact_dense_coeff_to_slot_matrices(context)?;
+		Self::new(
+			context,
+			plan,
+			&matrices.upper_from_slots,
+			&matrices.upper_from_conjugates,
+			&matrices.lower_from_slots,
+			&matrices.lower_from_conjugates,
+			ciphertext_scale_bits,
+		)
 	}
 }
 
@@ -130,6 +205,62 @@ pub fn coeff_to_slot(
 		&precomputed.diagonals,
 		rotation_keys,
 	))
+}
+
+pub fn coeff_to_slot_dense(
+	context: &RnsCkksContext,
+	ciphertext: &RnsCiphertext,
+	conjugated_ciphertext: &RnsCiphertext,
+	precomputed: &DenseCoeffToSlotPrecomputed,
+	rotation_keys: &DiagonalTransformRotationKeys,
+) -> Result<(RnsCiphertext, RnsCiphertext), String> {
+	let _runtime = CoeffToSlotRuntime::new(precomputed.plan.clone(), ciphertext)?;
+	if conjugated_ciphertext.level != ciphertext.level {
+		return Err(format!(
+			"conjugated ciphertext level {} did not match CoeffToSlot input level {}",
+			conjugated_ciphertext.level,
+			ciphertext.level,
+		));
+	}
+	if conjugated_ciphertext.scale_bits != ciphertext.scale_bits {
+		return Err(format!(
+			"conjugated ciphertext scale {} did not match CoeffToSlot input scale {}",
+			conjugated_ciphertext.scale_bits,
+			ciphertext.scale_bits,
+		));
+	}
+
+	let upper = apply_dense_branch(
+		context,
+		ciphertext,
+		conjugated_ciphertext,
+		&precomputed.upper_from_slots,
+		&precomputed.upper_from_conjugates,
+		rotation_keys,
+	);
+	let lower = apply_dense_branch(
+		context,
+		ciphertext,
+		conjugated_ciphertext,
+		&precomputed.lower_from_slots,
+		&precomputed.lower_from_conjugates,
+		rotation_keys,
+	);
+
+	Ok((upper, lower))
+}
+
+fn apply_dense_branch(
+	context: &RnsCkksContext,
+	ciphertext: &RnsCiphertext,
+	conjugated_ciphertext: &RnsCiphertext,
+	from_slots: &DiagonalTransformPlaintexts,
+	from_conjugates: &DiagonalTransformPlaintexts,
+	rotation_keys: &DiagonalTransformRotationKeys,
+) -> RnsCiphertext {
+	let direct = apply_diagonal_linear_transform(context, ciphertext, from_slots, rotation_keys);
+	let conjugate = apply_diagonal_linear_transform(context, conjugated_ciphertext, from_conjugates, rotation_keys);
+	direct.add(&conjugate)
 }
 
 fn validate_transform_matrix(matrix: &[Vec<Complex64>], expected_dimension: usize) -> Result<(), String> {
