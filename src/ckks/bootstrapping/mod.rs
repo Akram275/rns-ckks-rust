@@ -41,11 +41,22 @@ pub use linear_transform::{
 };
 pub use params::BootstrapParameters;
 pub use roundtrip::{
+	bootstrap_exact_dense_eval_mod_roundtrip,
 	bootstrap_exact_sparse_eval_mod_roundtrip,
 	bootstrap_identity_roundtrip,
 };
+pub use coeff_to_slot::{
+	coeff_to_slot,
+	coeff_to_slot_dense,
+	CoeffToSlotPlan,
+	CoeffToSlotPrecomputed,
+	CoeffToSlotRuntime,
+	DenseCoeffToSlotPrecomputed,
+};
 pub use slot_to_coeff::{
 	slot_to_coeff,
+	slot_to_coeff_dense,
+	DenseSlotToCoeffPrecomputed,
 	SlotToCoeffPlan,
 	SlotToCoeffPrecomputed,
 	SlotToCoeffRuntime,
