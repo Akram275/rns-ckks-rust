@@ -22,8 +22,8 @@ use crate::ckks::bootstrapping::linear_transform::{
     DiagonalTransformPlaintexts,
     DiagonalTransformRotationKeys,
 };
-use crate::ckks::bootstrapping::BootstrapParameters;
-use crate::rns::{RnsCiphertext, RnsCkksContext};
+use crate::ckks::bootstrapping::{BootstrapKeySet, BootstrapParameters};
+use crate::rns::{RnsCiphertext, RnsCkksContext, RnsKeyPair};
 
 /// Static planning data for a SlotToCoeff transform.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -224,6 +224,22 @@ pub fn slot_to_coeff_dense(
     );
 
     Ok(upper_term.add(&lower_term))
+}
+
+pub fn slot_to_coeff_dense_exact(
+    context: &RnsCkksContext,
+    upper: &RnsCiphertext,
+    lower: &RnsCiphertext,
+    key_pair: &RnsKeyPair,
+) -> Result<RnsCiphertext, String> {
+    let plan = SlotToCoeffPlan::from_ciphertext(context, upper, context.num_slots())?;
+    let precomputed = DenseSlotToCoeffPrecomputed::exact(context, plan, upper.scale_bits)?;
+    let dense_keys = BootstrapKeySet::for_dense_slot_to_coeff(context, key_pair, upper.level);
+    let rotation_keys = DiagonalTransformRotationKeys {
+        by_step: dense_keys.slot_to_coeff_rotation_keys,
+    };
+
+    slot_to_coeff_dense(context, upper, lower, &precomputed, &rotation_keys)
 }
 
 fn validate_transform_matrix(matrix: &[Vec<Complex64>], expected_dimension: usize) -> Result<(), String> {
