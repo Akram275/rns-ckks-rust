@@ -48,6 +48,7 @@ pub use roundtrip::{
 pub use coeff_to_slot::{
 	coeff_to_slot,
 	coeff_to_slot_dense,
+	coeff_to_slot_dense_exact,
 	CoeffToSlotPlan,
 	CoeffToSlotPrecomputed,
 	CoeffToSlotRuntime,
@@ -56,6 +57,7 @@ pub use coeff_to_slot::{
 pub use slot_to_coeff::{
 	slot_to_coeff,
 	slot_to_coeff_dense,
+	slot_to_coeff_dense_exact,
 	DenseSlotToCoeffPrecomputed,
 	SlotToCoeffPlan,
 	SlotToCoeffPrecomputed,
