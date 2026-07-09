@@ -22,8 +22,8 @@ use crate::ckks::bootstrapping::linear_transform::{
 	DiagonalTransformRotationKeys,
 	DiagonalTransformPlaintexts,
 };
-use crate::ckks::bootstrapping::BootstrapParameters;
-use crate::rns::{RnsCiphertext, RnsCkksContext};
+use crate::ckks::bootstrapping::{BootstrapKeySet, BootstrapParameters};
+use crate::rns::{RnsCiphertext, RnsCkksContext, RnsKeyPair};
 
 /// Static planning data for a CoeffToSlot transform.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -248,6 +248,32 @@ pub fn coeff_to_slot_dense(
 	);
 
 	Ok((upper, lower))
+}
+
+pub fn coeff_to_slot_dense_exact(
+	context: &RnsCkksContext,
+	ciphertext: &RnsCiphertext,
+	key_pair: &RnsKeyPair,
+) -> Result<(RnsCiphertext, RnsCiphertext), String> {
+	let dense_keys = BootstrapKeySet::for_dense_coeff_to_slot(context, key_pair, ciphertext.level);
+	let conjugation_key = dense_keys
+		.conjugation_key
+		.as_ref()
+		.ok_or_else(|| "dense CoeffToSlot key scaffold did not include a conjugation key".to_string())?;
+	let conjugated_ciphertext = context.conjugate(ciphertext, conjugation_key);
+	let plan = CoeffToSlotPlan::from_ciphertext(context, ciphertext, context.num_slots())?;
+	let precomputed = DenseCoeffToSlotPrecomputed::exact(context, plan, ciphertext.scale_bits)?;
+	let rotation_keys = DiagonalTransformRotationKeys {
+		by_step: dense_keys.coeff_to_slot_rotation_keys,
+	};
+
+	coeff_to_slot_dense(
+		context,
+		ciphertext,
+		&conjugated_ciphertext,
+		&precomputed,
+		&rotation_keys,
+	)
 }
 
 fn apply_dense_branch(
