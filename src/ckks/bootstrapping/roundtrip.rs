@@ -1,9 +1,8 @@
 use crate::ckks::bootstrapping::coeff_to_slot::{
     coeff_to_slot,
-    coeff_to_slot_dense,
+    coeff_to_slot_dense_exact,
     CoeffToSlotPlan,
     CoeffToSlotPrecomputed,
-    DenseCoeffToSlotPrecomputed,
 };
 use crate::ckks::bootstrapping::eval_mod::{eval_mod, EvalModPlan, EvalModPrecomputed};
 use crate::ckks::bootstrapping::linear_transform::generate_diagonal_transform_rotation_keys;
@@ -11,8 +10,7 @@ use crate::ckks::bootstrapping::mod_raise::{mod_raise, ModRaisedCiphertext};
 use crate::ckks::bootstrapping::keys::BootstrapKeySet;
 use crate::ckks::bootstrapping::slot_to_coeff::{
     slot_to_coeff,
-    slot_to_coeff_dense,
-    DenseSlotToCoeffPrecomputed,
+    slot_to_coeff_dense_exact,
     SlotToCoeffPlan,
     SlotToCoeffPrecomputed,
 };
@@ -201,30 +199,7 @@ pub fn bootstrap_exact_dense_eval_mod_roundtrip_from_mod_raise(
     polynomial_degree: usize,
 ) -> Result<RnsCiphertext, String> {
     let projected = raised.project_to_q_ciphertext();
-    let conjugation_key = context.generate_conjugation_key_at_level(
-        &key_pair.secret_key,
-        &key_pair.public_key,
-        projected.level,
-    );
-    let conjugated = context.conjugate(&projected, &conjugation_key);
-    let coeff_to_slot_plan = CoeffToSlotPlan::from_ciphertext(context, &projected, context.num_slots())?;
-    let dense_coeff_to_slot = DenseCoeffToSlotPrecomputed::exact(
-        context,
-        coeff_to_slot_plan,
-        projected.scale_bits,
-    )?;
-    let coeff_to_slot_keys = BootstrapKeySet::for_dense_coeff_to_slot(context, key_pair, projected.level);
-    let dense_rotation_keys = crate::ckks::bootstrapping::DiagonalTransformRotationKeys {
-        by_step: coeff_to_slot_keys.coeff_to_slot_rotation_keys.clone(),
-    };
-
-    let dense_slots = coeff_to_slot_dense(
-        context,
-        &projected,
-        &conjugated,
-        &dense_coeff_to_slot,
-        &dense_rotation_keys,
-    )?;
+    let dense_slots = coeff_to_slot_dense_exact(context, &projected, key_pair)?;
 
     let eval_mod_plan = EvalModPlan::from_ciphertext(
         context,
@@ -254,24 +229,7 @@ pub fn bootstrap_exact_dense_eval_mod_roundtrip_from_mod_raise(
         &eval_mod_keys.eval_mod_relinearization_keys,
     )?;
 
-    let slot_to_coeff_plan = SlotToCoeffPlan::from_ciphertext(context, &evaluated_upper, context.num_slots())?;
-    let dense_slot_to_coeff = DenseSlotToCoeffPrecomputed::exact(
-        context,
-        slot_to_coeff_plan,
-        evaluated_upper.scale_bits,
-    )?;
-    let slot_to_coeff_keys = BootstrapKeySet::for_dense_slot_to_coeff(context, key_pair, evaluated_upper.level);
-    let dense_rotation_keys = crate::ckks::bootstrapping::DiagonalTransformRotationKeys {
-        by_step: slot_to_coeff_keys.slot_to_coeff_rotation_keys.clone(),
-    };
-
-    slot_to_coeff_dense(
-        context,
-        &evaluated_upper,
-        &evaluated_lower,
-        &dense_slot_to_coeff,
-        &dense_rotation_keys,
-    )
+    slot_to_coeff_dense_exact(context, &evaluated_upper, &evaluated_lower, key_pair)
 }
 
 fn identity_matrix(dimension: usize) -> Vec<Vec<Complex64>> {
@@ -299,20 +257,16 @@ mod tests {
     };
     use crate::ckks::bootstrapping::mod_raise::mod_raise;
     use crate::ckks::bootstrapping::{
-        coeff_to_slot_dense,
-        slot_to_coeff_dense,
-        CoeffToSlotPlan,
-        DenseCoeffToSlotPrecomputed,
-        DenseSlotToCoeffPrecomputed,
+        coeff_to_slot_dense_exact,
         eval_mod,
         exact_coeff_to_slot_matrix,
         exact_dense_coeff_to_slot_matrices,
         exact_dense_slot_to_coeff_matrices,
         exact_slot_to_coeff_matrix,
+        slot_to_coeff_dense_exact,
         BootstrapKeySet,
         EvalModPlan,
         EvalModPrecomputed,
-        SlotToCoeffPlan,
     };
     use crate::ckks::bootstrapping::linear_transform::repeat_block_slots;
     use crate::ckks::bootstrapping::eval_mod::sine_taylor_coefficients;
@@ -435,19 +389,7 @@ mod tests {
         ];
         let ciphertext = context.encrypt(&context.encode(&input), &key_pair.public_key);
         let projected = mod_raise(&context, &ciphertext).project_to_q_ciphertext();
-        let conjugation_key = context.generate_conjugation_key_at_level(
-            &key_pair.secret_key,
-            &key_pair.public_key,
-            projected.level,
-        );
-        let conjugated = context.conjugate(&projected, &conjugation_key);
-
-        let (upper_ct, lower_ct) = dense_coeff_to_slot_exact(
-            &context,
-            &projected,
-            &conjugated,
-            &key_pair,
-        )
+        let (upper_ct, lower_ct) = coeff_to_slot_dense_exact(&context, &projected, &key_pair)
         .expect("dense exact CoeffToSlot must succeed");
         let upper = context.decode_at_scale(
             &context.decrypt(&upper_ct, &key_pair.secret_key),
@@ -501,26 +443,10 @@ mod tests {
         ];
         let ciphertext = context.encrypt(&context.encode(&input), &key_pair.public_key);
         let projected = mod_raise(&context, &ciphertext).project_to_q_ciphertext();
-        let conjugation_key = context.generate_conjugation_key_at_level(
-            &key_pair.secret_key,
-            &key_pair.public_key,
-            projected.level,
-        );
-        let conjugated = context.conjugate(&projected, &conjugation_key);
-        let (upper_ct, lower_ct) = dense_coeff_to_slot_exact(
-            &context,
-            &projected,
-            &conjugated,
-            &key_pair,
-        )
+        let (upper_ct, lower_ct) = coeff_to_slot_dense_exact(&context, &projected, &key_pair)
         .expect("dense exact CoeffToSlot must succeed");
 
-        let recovered_ct = dense_slot_to_coeff_exact(
-            &context,
-            &upper_ct,
-            &lower_ct,
-            &key_pair,
-        )
+        let recovered_ct = slot_to_coeff_dense_exact(&context, &upper_ct, &lower_ct, &key_pair)
         .expect("dense exact SlotToCoeff must succeed");
         let recovered = context.decode_at_scale(
             &context.decrypt(&recovered_ct, &key_pair.secret_key),
@@ -554,18 +480,7 @@ mod tests {
         ];
         let ciphertext = context.encrypt(&context.encode(&input), &key_pair.public_key);
         let projected = mod_raise(&context, &ciphertext).project_to_q_ciphertext();
-        let conjugation_key = context.generate_conjugation_key_at_level(
-            &key_pair.secret_key,
-            &key_pair.public_key,
-            projected.level,
-        );
-        let conjugated = context.conjugate(&projected, &conjugation_key);
-        let (upper_ct, lower_ct) = dense_coeff_to_slot_exact(
-            &context,
-            &projected,
-            &conjugated,
-            &key_pair,
-        )
+        let (upper_ct, lower_ct) = coeff_to_slot_dense_exact(&context, &projected, &key_pair)
         .expect("dense exact CoeffToSlot must succeed");
 
         let eval_mod_plan = EvalModPlan::from_ciphertext(
@@ -740,43 +655,5 @@ mod tests {
             .fold(Complex64::new(0.0, 0.0), |accumulator, &coefficient| {
                 accumulator * value + Complex64::new(coefficient, 0.0)
             })
-    }
-
-    fn dense_coeff_to_slot_exact(
-        context: &RnsCkksContext,
-        ciphertext: &crate::rns::RnsCiphertext,
-        conjugated_ciphertext: &crate::rns::RnsCiphertext,
-        key_pair: &crate::rns::RnsKeyPair,
-    ) -> Result<(crate::rns::RnsCiphertext, crate::rns::RnsCiphertext), String> {
-        let plan = CoeffToSlotPlan::from_ciphertext(context, ciphertext, context.num_slots())?;
-        let precomputed = DenseCoeffToSlotPrecomputed::exact(context, plan, ciphertext.scale_bits)?;
-        let keys = BootstrapKeySet::for_dense_coeff_to_slot(context, key_pair, ciphertext.level);
-        let rotation_keys = crate::ckks::bootstrapping::DiagonalTransformRotationKeys {
-            by_step: keys.coeff_to_slot_rotation_keys,
-        };
-
-        coeff_to_slot_dense(
-            context,
-            ciphertext,
-            conjugated_ciphertext,
-            &precomputed,
-            &rotation_keys,
-        )
-    }
-
-    fn dense_slot_to_coeff_exact(
-        context: &RnsCkksContext,
-        upper: &crate::rns::RnsCiphertext,
-        lower: &crate::rns::RnsCiphertext,
-        key_pair: &crate::rns::RnsKeyPair,
-    ) -> Result<crate::rns::RnsCiphertext, String> {
-        let plan = SlotToCoeffPlan::from_ciphertext(context, upper, context.num_slots())?;
-        let precomputed = DenseSlotToCoeffPrecomputed::exact(context, plan, upper.scale_bits)?;
-        let keys = BootstrapKeySet::for_dense_slot_to_coeff(context, key_pair, upper.level);
-        let rotation_keys = crate::ckks::bootstrapping::DiagonalTransformRotationKeys {
-            by_step: keys.slot_to_coeff_rotation_keys,
-        };
-
-        slot_to_coeff_dense(context, upper, lower, &precomputed, &rotation_keys)
     }
 }
