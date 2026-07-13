@@ -99,6 +99,27 @@ impl SlotToCoeffPrecomputed {
         let matrix = exact_slot_to_coeff_matrix(context, plan.transform_dimension)?;
         Self::new(context, plan, &matrix, ciphertext_scale_bits)
     }
+
+    pub fn identity(
+        context: &RnsCkksContext,
+        plan: SlotToCoeffPlan,
+        ciphertext_scale_bits: usize,
+    ) -> Result<Self, String> {
+        let matrix: Vec<Vec<Complex64>> = (0..plan.transform_dimension)
+            .map(|row| {
+                (0..plan.transform_dimension)
+                    .map(|col| {
+                        if row == col {
+                            Complex64::new(1.0, 0.0)
+                        } else {
+                            Complex64::new(0.0, 0.0)
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        Self::new(context, plan, &matrix, ciphertext_scale_bits)
+    }
 }
 
 impl DenseSlotToCoeffPrecomputed {
@@ -195,6 +216,22 @@ pub fn slot_to_coeff_exact(
 ) -> Result<RnsCiphertext, String> {
     let plan = SlotToCoeffPlan::from_ciphertext(context, ciphertext, active_slots)?;
     let precomputed = SlotToCoeffPrecomputed::exact(context, plan, ciphertext.scale_bits)?;
+    let keys = BootstrapKeySet::for_slot_to_coeff(context, key_pair, ciphertext.level, active_slots);
+    let rotation_keys = DiagonalTransformRotationKeys {
+        by_step: keys.slot_to_coeff_rotation_keys,
+    };
+
+    slot_to_coeff(context, ciphertext, &precomputed, &rotation_keys)
+}
+
+pub fn slot_to_coeff_identity(
+    context: &RnsCkksContext,
+    ciphertext: &RnsCiphertext,
+    key_pair: &RnsKeyPair,
+    active_slots: usize,
+) -> Result<RnsCiphertext, String> {
+    let plan = SlotToCoeffPlan::from_ciphertext(context, ciphertext, active_slots)?;
+    let precomputed = SlotToCoeffPrecomputed::identity(context, plan, ciphertext.scale_bits)?;
     let keys = BootstrapKeySet::for_slot_to_coeff(context, key_pair, ciphertext.level, active_slots);
     let rotation_keys = DiagonalTransformRotationKeys {
         by_step: keys.slot_to_coeff_rotation_keys,
