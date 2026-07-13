@@ -101,6 +101,27 @@ impl CoeffToSlotPrecomputed {
 		let matrix = exact_coeff_to_slot_matrix(context, plan.transform_dimension)?;
 		Self::new(context, plan, &matrix, ciphertext_scale_bits)
 	}
+
+	pub fn identity(
+		context: &RnsCkksContext,
+		plan: CoeffToSlotPlan,
+		ciphertext_scale_bits: usize,
+	) -> Result<Self, String> {
+		let matrix: Vec<Vec<Complex64>> = (0..plan.transform_dimension)
+			.map(|row| {
+				(0..plan.transform_dimension)
+					.map(|col| {
+						if row == col {
+							Complex64::new(1.0, 0.0)
+						} else {
+							Complex64::new(0.0, 0.0)
+						}
+					})
+					.collect()
+			})
+			.collect();
+		Self::new(context, plan, &matrix, ciphertext_scale_bits)
+	}
 }
 
 impl DenseCoeffToSlotPrecomputed {
@@ -215,6 +236,22 @@ pub fn coeff_to_slot_exact(
 ) -> Result<RnsCiphertext, String> {
 	let plan = CoeffToSlotPlan::from_ciphertext(context, ciphertext, active_slots)?;
 	let precomputed = CoeffToSlotPrecomputed::exact(context, plan, ciphertext.scale_bits)?;
+	let keys = BootstrapKeySet::for_coeff_to_slot(context, key_pair, ciphertext.level, active_slots);
+	let rotation_keys = DiagonalTransformRotationKeys {
+		by_step: keys.coeff_to_slot_rotation_keys,
+	};
+
+	coeff_to_slot(context, ciphertext, &precomputed, &rotation_keys)
+}
+
+pub fn coeff_to_slot_identity(
+	context: &RnsCkksContext,
+	ciphertext: &RnsCiphertext,
+	key_pair: &RnsKeyPair,
+	active_slots: usize,
+) -> Result<RnsCiphertext, String> {
+	let plan = CoeffToSlotPlan::from_ciphertext(context, ciphertext, active_slots)?;
+	let precomputed = CoeffToSlotPrecomputed::identity(context, plan, ciphertext.scale_bits)?;
 	let keys = BootstrapKeySet::for_coeff_to_slot(context, key_pair, ciphertext.level, active_slots);
 	let rotation_keys = DiagonalTransformRotationKeys {
 		by_step: keys.coeff_to_slot_rotation_keys,
