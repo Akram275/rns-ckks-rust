@@ -35,6 +35,44 @@ impl BootstrapKeySet {
         }
     }
 
+    pub fn for_coeff_to_slot(
+        context: &RnsCkksContext,
+        key_pair: &RnsKeyPair,
+        ciphertext_level: usize,
+        active_slots: usize,
+    ) -> Self {
+        let rotation_keys = generate_diagonal_transform_rotation_keys(
+            context,
+            &key_pair.secret_key,
+            &key_pair.public_key,
+            ciphertext_level,
+            active_slots,
+        );
+        Self {
+            coeff_to_slot_rotation_keys: rotation_keys.by_step,
+            ..Self::default()
+        }
+    }
+
+    pub fn for_slot_to_coeff(
+        context: &RnsCkksContext,
+        key_pair: &RnsKeyPair,
+        ciphertext_level: usize,
+        active_slots: usize,
+    ) -> Self {
+        let rotation_keys = generate_diagonal_transform_rotation_keys(
+            context,
+            &key_pair.secret_key,
+            &key_pair.public_key,
+            ciphertext_level,
+            active_slots,
+        );
+        Self {
+            slot_to_coeff_rotation_keys: rotation_keys.by_step,
+            ..Self::default()
+        }
+    }
+
     pub fn for_dense_coeff_to_slot(
         context: &RnsCkksContext,
         key_pair: &RnsKeyPair,
@@ -130,6 +168,19 @@ mod tests {
     }
 
     #[test]
+    fn coeff_to_slot_key_scaffold_includes_sparse_rotations_only() {
+        let context = sample_key_context();
+        let key_pair = context.keygen(16);
+
+        let keys = BootstrapKeySet::for_coeff_to_slot(&context, &key_pair, 3, 4);
+
+        assert_eq!(keys.coeff_to_slot_rotation_keys.len(), 3);
+        assert!(keys.slot_to_coeff_rotation_keys.is_empty());
+        assert!(keys.eval_mod_relinearization_keys.is_empty());
+        assert!(keys.conjugation_key.is_none());
+    }
+
+    #[test]
     fn dense_slot_to_coeff_key_scaffold_includes_rotations() {
         let context = sample_key_context();
         let key_pair = context.keygen(16);
@@ -138,6 +189,19 @@ mod tests {
 
         assert_eq!(keys.slot_to_coeff_rotation_keys.len(), context.num_slots() - 1);
         assert!(keys.coeff_to_slot_rotation_keys.is_empty());
+        assert!(keys.conjugation_key.is_none());
+    }
+
+    #[test]
+    fn slot_to_coeff_key_scaffold_includes_sparse_rotations_only() {
+        let context = sample_key_context();
+        let key_pair = context.keygen(16);
+
+        let keys = BootstrapKeySet::for_slot_to_coeff(&context, &key_pair, 3, 4);
+
+        assert_eq!(keys.slot_to_coeff_rotation_keys.len(), 3);
+        assert!(keys.coeff_to_slot_rotation_keys.is_empty());
+        assert!(keys.eval_mod_relinearization_keys.is_empty());
         assert!(keys.conjugation_key.is_none());
     }
 }
