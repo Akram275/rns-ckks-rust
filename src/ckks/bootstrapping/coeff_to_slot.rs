@@ -207,6 +207,22 @@ pub fn coeff_to_slot(
 	))
 }
 
+pub fn coeff_to_slot_exact(
+	context: &RnsCkksContext,
+	ciphertext: &RnsCiphertext,
+	key_pair: &RnsKeyPair,
+	active_slots: usize,
+) -> Result<RnsCiphertext, String> {
+	let plan = CoeffToSlotPlan::from_ciphertext(context, ciphertext, active_slots)?;
+	let precomputed = CoeffToSlotPrecomputed::exact(context, plan, ciphertext.scale_bits)?;
+	let keys = BootstrapKeySet::for_coeff_to_slot(context, key_pair, ciphertext.level, active_slots);
+	let rotation_keys = DiagonalTransformRotationKeys {
+		by_step: keys.coeff_to_slot_rotation_keys,
+	};
+
+	coeff_to_slot(context, ciphertext, &precomputed, &rotation_keys)
+}
+
 pub fn coeff_to_slot_dense(
 	context: &RnsCkksContext,
 	ciphertext: &RnsCiphertext,
