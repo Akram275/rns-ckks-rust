@@ -1,16 +1,17 @@
 use crate::ckks::bootstrapping::coeff_to_slot::{
     coeff_to_slot,
     coeff_to_slot_dense_exact,
+    coeff_to_slot_exact,
     CoeffToSlotPlan,
     CoeffToSlotPrecomputed,
 };
 use crate::ckks::bootstrapping::eval_mod::{eval_mod, EvalModPlan, EvalModPrecomputed};
-use crate::ckks::bootstrapping::linear_transform::generate_diagonal_transform_rotation_keys;
 use crate::ckks::bootstrapping::mod_raise::{mod_raise, ModRaisedCiphertext};
 use crate::ckks::bootstrapping::keys::BootstrapKeySet;
 use crate::ckks::bootstrapping::slot_to_coeff::{
     slot_to_coeff,
     slot_to_coeff_dense_exact,
+    slot_to_coeff_exact,
     SlotToCoeffPlan,
     SlotToCoeffPrecomputed,
 };
@@ -80,13 +81,15 @@ pub fn bootstrap_identity_roundtrip_from_mod_raise(
         &identity,
         projected.scale_bits,
     )?;
-    let coeff_to_slot_rotation_keys = generate_diagonal_transform_rotation_keys(
+    let coeff_to_slot_keys = BootstrapKeySet::for_coeff_to_slot(
         context,
-        &key_pair.secret_key,
-        &key_pair.public_key,
+        key_pair,
         projected.level,
         active_slots,
     );
+    let coeff_to_slot_rotation_keys = crate::ckks::bootstrapping::DiagonalTransformRotationKeys {
+        by_step: coeff_to_slot_keys.coeff_to_slot_rotation_keys,
+    };
 
     let slots = coeff_to_slot(
         context,
@@ -101,13 +104,15 @@ pub fn bootstrap_identity_roundtrip_from_mod_raise(
         &identity,
         slots.scale_bits,
     )?;
-    let slot_to_coeff_rotation_keys = generate_diagonal_transform_rotation_keys(
+    let slot_to_coeff_keys = BootstrapKeySet::for_slot_to_coeff(
         context,
-        &key_pair.secret_key,
-        &key_pair.public_key,
+        key_pair,
         slots.level,
         active_slots,
     );
+    let slot_to_coeff_rotation_keys = crate::ckks::bootstrapping::DiagonalTransformRotationKeys {
+        by_step: slot_to_coeff_keys.slot_to_coeff_rotation_keys,
+    };
 
     slot_to_coeff(
         context,
@@ -126,26 +131,7 @@ pub fn bootstrap_exact_sparse_eval_mod_roundtrip_from_mod_raise(
     polynomial_degree: usize,
 ) -> Result<RnsCiphertext, String> {
     let projected = raised.project_to_q_ciphertext();
-
-    let coeff_to_slot_plan = CoeffToSlotPlan::from_ciphertext(context, &projected, active_slots)?;
-    let coeff_to_slot_precomputed = CoeffToSlotPrecomputed::exact(
-        context,
-        coeff_to_slot_plan,
-        projected.scale_bits,
-    )?;
-    let coeff_to_slot_rotation_keys = generate_diagonal_transform_rotation_keys(
-        context,
-        &key_pair.secret_key,
-        &key_pair.public_key,
-        projected.level,
-        active_slots,
-    );
-    let slots = coeff_to_slot(
-        context,
-        &projected,
-        &coeff_to_slot_precomputed,
-        &coeff_to_slot_rotation_keys,
-    )?;
+    let slots = coeff_to_slot_exact(context, &projected, key_pair, active_slots)?;
 
     let eval_mod_plan = EvalModPlan::from_ciphertext(
         context,
@@ -169,26 +155,7 @@ pub fn bootstrap_exact_sparse_eval_mod_roundtrip_from_mod_raise(
         &eval_mod_keys.eval_mod_relinearization_keys,
     )?;
 
-    let slot_to_coeff_plan = SlotToCoeffPlan::from_ciphertext(context, &evaluated, active_slots)?;
-    let slot_to_coeff_precomputed = SlotToCoeffPrecomputed::exact(
-        context,
-        slot_to_coeff_plan,
-        evaluated.scale_bits,
-    )?;
-    let slot_to_coeff_rotation_keys = generate_diagonal_transform_rotation_keys(
-        context,
-        &key_pair.secret_key,
-        &key_pair.public_key,
-        evaluated.level,
-        active_slots,
-    );
-
-    slot_to_coeff(
-        context,
-        &evaluated,
-        &slot_to_coeff_precomputed,
-        &slot_to_coeff_rotation_keys,
-    )
+    slot_to_coeff_exact(context, &evaluated, key_pair, active_slots)
 }
 
 pub fn bootstrap_exact_dense_eval_mod_roundtrip_from_mod_raise(
