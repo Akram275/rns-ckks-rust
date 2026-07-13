@@ -1,22 +1,17 @@
 use crate::ckks::bootstrapping::coeff_to_slot::{
-    coeff_to_slot,
     coeff_to_slot_dense_exact,
     coeff_to_slot_exact,
-    CoeffToSlotPlan,
-    CoeffToSlotPrecomputed,
+    coeff_to_slot_identity,
 };
 use crate::ckks::bootstrapping::eval_mod::{eval_mod, EvalModPlan, EvalModPrecomputed};
 use crate::ckks::bootstrapping::mod_raise::{mod_raise, ModRaisedCiphertext};
 use crate::ckks::bootstrapping::keys::BootstrapKeySet;
 use crate::ckks::bootstrapping::slot_to_coeff::{
-    slot_to_coeff,
     slot_to_coeff_dense_exact,
     slot_to_coeff_exact,
-    SlotToCoeffPlan,
-    SlotToCoeffPrecomputed,
+    slot_to_coeff_identity,
 };
 use crate::rns::{RnsCiphertext, RnsCkksContext};
-use num_complex::Complex64;
 
 pub fn bootstrap_identity_roundtrip(
     context: &RnsCkksContext,
@@ -71,55 +66,8 @@ pub fn bootstrap_identity_roundtrip_from_mod_raise(
     active_slots: usize,
 ) -> Result<RnsCiphertext, String> {
     let projected = raised.project_to_q_ciphertext();
-
-    let coeff_to_slot_plan = CoeffToSlotPlan::from_ciphertext(context, &projected, active_slots)?;
-    let identity = identity_matrix(active_slots);
-
-    let coeff_to_slot_precomputed = CoeffToSlotPrecomputed::new(
-        context,
-        coeff_to_slot_plan,
-        &identity,
-        projected.scale_bits,
-    )?;
-    let coeff_to_slot_keys = BootstrapKeySet::for_coeff_to_slot(
-        context,
-        key_pair,
-        projected.level,
-        active_slots,
-    );
-    let coeff_to_slot_rotation_keys = crate::ckks::bootstrapping::DiagonalTransformRotationKeys {
-        by_step: coeff_to_slot_keys.coeff_to_slot_rotation_keys,
-    };
-
-    let slots = coeff_to_slot(
-        context,
-        &projected,
-        &coeff_to_slot_precomputed,
-        &coeff_to_slot_rotation_keys,
-    )?;
-    let slot_to_coeff_plan = SlotToCoeffPlan::from_ciphertext(context, &slots, active_slots)?;
-    let slot_to_coeff_precomputed = SlotToCoeffPrecomputed::new(
-        context,
-        slot_to_coeff_plan,
-        &identity,
-        slots.scale_bits,
-    )?;
-    let slot_to_coeff_keys = BootstrapKeySet::for_slot_to_coeff(
-        context,
-        key_pair,
-        slots.level,
-        active_slots,
-    );
-    let slot_to_coeff_rotation_keys = crate::ckks::bootstrapping::DiagonalTransformRotationKeys {
-        by_step: slot_to_coeff_keys.slot_to_coeff_rotation_keys,
-    };
-
-    slot_to_coeff(
-        context,
-        &slots,
-        &slot_to_coeff_precomputed,
-        &slot_to_coeff_rotation_keys,
-    )
+    let slots = coeff_to_slot_identity(context, &projected, key_pair, active_slots)?;
+    slot_to_coeff_identity(context, &slots, key_pair, active_slots)
 }
 
 pub fn bootstrap_exact_sparse_eval_mod_roundtrip_from_mod_raise(
@@ -197,22 +145,6 @@ pub fn bootstrap_exact_dense_eval_mod_roundtrip_from_mod_raise(
     )?;
 
     slot_to_coeff_dense_exact(context, &evaluated_upper, &evaluated_lower, key_pair)
-}
-
-fn identity_matrix(dimension: usize) -> Vec<Vec<Complex64>> {
-    (0..dimension)
-        .map(|row| {
-            (0..dimension)
-                .map(|col| {
-                    if row == col {
-                        Complex64::new(1.0, 0.0)
-                    } else {
-                        Complex64::new(0.0, 0.0)
-                    }
-                })
-                .collect()
-        })
-        .collect()
 }
 
 #[cfg(test)]
