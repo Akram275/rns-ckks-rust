@@ -80,27 +80,13 @@ pub fn bootstrap_exact_sparse_eval_mod_roundtrip_from_mod_raise(
 ) -> Result<RnsCiphertext, String> {
     let projected = raised.project_to_q_ciphertext();
     let slots = coeff_to_slot_exact(context, &projected, key_pair, active_slots)?;
-
-    let eval_mod_plan = EvalModPlan::from_ciphertext(
+    let evaluated = eval_mod_exact(
         context,
         &slots,
+        key_pair,
         active_slots,
-        1.0,
         sine_scale,
         polynomial_degree,
-    )?;
-    let eval_mod_precomputed = EvalModPrecomputed::sine_taylor(eval_mod_plan)?;
-    let eval_mod_keys = BootstrapKeySet::for_eval_mod(
-        context,
-        key_pair,
-        slots.level,
-        eval_mod_precomputed.coefficients.len(),
-    );
-    let evaluated = eval_mod(
-        context,
-        &slots,
-        &eval_mod_precomputed,
-        &eval_mod_keys.eval_mod_relinearization_keys,
     )?;
 
     slot_to_coeff_exact(context, &evaluated, key_pair, active_slots)
@@ -115,11 +101,31 @@ pub fn bootstrap_exact_dense_eval_mod_roundtrip_from_mod_raise(
 ) -> Result<RnsCiphertext, String> {
     let projected = raised.project_to_q_ciphertext();
     let dense_slots = coeff_to_slot_dense_exact(context, &projected, key_pair)?;
-
-    let eval_mod_plan = EvalModPlan::from_ciphertext(
+    let (evaluated_upper, evaluated_lower) = eval_mod_exact_pair(
         context,
         &dense_slots.0,
+        &dense_slots.1,
+        key_pair,
         context.num_slots(),
+        sine_scale,
+        polynomial_degree,
+    )?;
+
+    slot_to_coeff_dense_exact(context, &evaluated_upper, &evaluated_lower, key_pair)
+}
+
+fn eval_mod_exact(
+    context: &RnsCkksContext,
+    ciphertext: &RnsCiphertext,
+    key_pair: &crate::rns::RnsKeyPair,
+    active_slots: usize,
+    sine_scale: f64,
+    polynomial_degree: usize,
+) -> Result<RnsCiphertext, String> {
+    let eval_mod_plan = EvalModPlan::from_ciphertext(
+        context,
+        ciphertext,
+        active_slots,
         1.0,
         sine_scale,
         polynomial_degree,
@@ -128,23 +134,45 @@ pub fn bootstrap_exact_dense_eval_mod_roundtrip_from_mod_raise(
     let eval_mod_keys = BootstrapKeySet::for_eval_mod(
         context,
         key_pair,
-        dense_slots.0.level,
+        ciphertext.level,
         eval_mod_precomputed.coefficients.len(),
     );
-    let evaluated_upper = eval_mod(
+
+    eval_mod(
         context,
-        &dense_slots.0,
+        ciphertext,
         &eval_mod_precomputed,
         &eval_mod_keys.eval_mod_relinearization_keys,
+    )
+}
+
+fn eval_mod_exact_pair(
+    context: &RnsCkksContext,
+    upper: &RnsCiphertext,
+    lower: &RnsCiphertext,
+    key_pair: &crate::rns::RnsKeyPair,
+    active_slots: usize,
+    sine_scale: f64,
+    polynomial_degree: usize,
+) -> Result<(RnsCiphertext, RnsCiphertext), String> {
+    let evaluated_upper = eval_mod_exact(
+        context,
+        upper,
+        key_pair,
+        active_slots,
+        sine_scale,
+        polynomial_degree,
     )?;
-    let evaluated_lower = eval_mod(
+    let evaluated_lower = eval_mod_exact(
         context,
-        &dense_slots.1,
-        &eval_mod_precomputed,
-        &eval_mod_keys.eval_mod_relinearization_keys,
+        lower,
+        key_pair,
+        active_slots,
+        sine_scale,
+        polynomial_degree,
     )?;
 
-    slot_to_coeff_dense_exact(context, &evaluated_upper, &evaluated_lower, key_pair)
+    Ok((evaluated_upper, evaluated_lower))
 }
 
 #[cfg(test)]
