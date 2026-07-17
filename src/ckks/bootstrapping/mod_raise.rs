@@ -44,6 +44,7 @@ pub fn mod_raise(context: &RnsCkksContext, ciphertext: &RnsCiphertext) -> ModRai
     }
 }
 
+//Used for testing only
 pub fn decrypt_mod_raised(
     context: &RnsCkksContext,
     ciphertext: &ModRaisedCiphertext,
