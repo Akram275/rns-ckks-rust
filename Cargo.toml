@@ -65,6 +65,10 @@ name = "rns_paterson_stockmeyer"
 path = "examples/algorithmics/rns_paterson_stockmeyer.rs"
 
 [[example]]
+name = "rns_bootstrap_sparse_roundtrip"
+path = "examples/algorithmics/rns_bootstrap_sparse_roundtrip.rs"
+
+[[example]]
 name = "rns_total_sum"
 path = "examples/algorithmics/rns_total_sum.rs"
 
