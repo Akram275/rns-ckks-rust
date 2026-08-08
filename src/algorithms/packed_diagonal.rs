@@ -2,13 +2,13 @@
 //!
 //! Packing contract:
 //! - the matrix is square of dimension `n`, with `n` a power of two,
-//! - only the first `n` slots of each packed diagonal plaintext are used; the
-//!   remaining CKKS slots are zero-padded,
 //! - the encrypted input vector is repeated blockwise across the full slot
 //!   count so that ordinary CKKS rotations realize cyclic shifts of the active
 //!   `n`-slot block,
-//! - the first `n` output slots contain the matrix-vector product and the tail
-//!   is expected to stay near zero.
+//! - the packed diagonal plaintexts are tiled with the same period `n` (not
+//!   zero-padded), which the BSGS giant-step rotation requires for correctness,
+//! - the first `n` output slots contain the matrix-vector product and the
+//!   remaining slots repeat that same `n`-slot block.
 
 use num_complex::Complex64;
 
@@ -139,9 +139,11 @@ mod tests {
                 "expected {expected_value}, got {} at slot {index}",
                 recovered[index]
             );
+            // The BSGS giant-step rotation requires the mask (and thus the
+            // output) to stay periodic with period `dimension`, not zero past it.
             assert!(
-                recovered[index + matrix.len()].abs() <= 2e-2,
-                "expected zero-padded tail, got {} at slot {}",
+                (recovered[index + matrix.len()] - expected_value).abs() <= 2e-2,
+                "expected periodic tail matching {expected_value}, got {} at slot {}",
                 recovered[index + matrix.len()],
                 index + matrix.len()
             );
