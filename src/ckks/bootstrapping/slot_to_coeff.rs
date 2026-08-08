@@ -17,7 +17,7 @@ use crate::ckks::bootstrapping::exact_transforms::{
 };
 use crate::ckks::bootstrapping::linear_transform::{
     apply_diagonal_linear_transform,
-    diagonal_transform_rotation_steps,
+    diagonal_transform_bsgs_rotation_steps,
     pack_diagonal_transform_plaintexts,
     DiagonalTransformPlaintexts,
     DiagonalTransformRotationKeys,
@@ -36,7 +36,7 @@ pub struct SlotToCoeffPlan {
 impl SlotToCoeffPlan {
     pub fn new(bootstrap: BootstrapParameters) -> Self {
         let transform_dimension = bootstrap.active_slots;
-        let rotation_steps = diagonal_transform_rotation_steps(transform_dimension);
+        let rotation_steps = diagonal_transform_bsgs_rotation_steps(transform_dimension);
 
         Self {
             bootstrap,
@@ -340,7 +340,7 @@ mod tests {
 
         assert_eq!(plan.bootstrap, bootstrap);
         assert_eq!(plan.transform_dimension, 8);
-        assert_eq!(plan.rotation_steps, vec![1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(plan.rotation_steps, vec![1, 2, 3, 6]);
     }
 
     #[test]
