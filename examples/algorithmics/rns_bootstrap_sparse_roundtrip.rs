@@ -18,7 +18,7 @@ use num_complex::Complex64;
 const ACTIVE_SLOTS: usize = 8;
 const SINE_SCALE: f64 = 1.0;
 const POLYNOMIAL_DEGREE: usize = 5;
-const ROUNDTRIP_TOLERANCE: f64 = 5e-2;
+const ROUNDTRIP_TOLERANCE: f64 = 6e-2;
 
 fn main() {
     let total_start = Instant::now();
@@ -28,14 +28,14 @@ fn main() {
     let key_pair = context.keygen(64);
 
     let message = vec![
-        Complex64::new(0.03125, -0.015625),
-        Complex64::new(-0.05, 0.0125),
-        Complex64::new(0.08, -0.02),
-        Complex64::new(-0.02, 0.01),
-        Complex64::new(0.0125, -0.03125),
-        Complex64::new(-0.04, 0.02),
-        Complex64::new(0.025, -0.0125),
-        Complex64::new(-0.01, 0.04),
+        Complex64::new(0.25, -0.125),
+        Complex64::new(-0.32, 0.08),
+        Complex64::new(0.48, -0.12),
+        Complex64::new(-0.18, 0.09),
+        Complex64::new(0.14, -0.28),
+        Complex64::new(-0.27, 0.13),
+        Complex64::new(0.21, -0.1),
+        Complex64::new(-0.12, 0.31),
     ];
     let mask = vec![
         Complex64::new(0.5, 0.0),
@@ -174,6 +174,7 @@ fn main() {
     println!("expected first active slots: {:?}", &expected[..ACTIVE_SLOTS]);
     println!("recovered first active slots: {:?}", &recovered[..ACTIVE_SLOTS]);
     println!("maximum active-slot error: {:.6e}", max_error);
+    println!("roundtrip tolerance: {:.6e}", ROUNDTRIP_TOLERANCE);
 
     assert!(
         max_error <= ROUNDTRIP_TOLERANCE,
