@@ -119,6 +119,7 @@ impl BootstrapKeySet {
 mod tests {
     use super::BootstrapKeySet;
     use crate::algorithms::paterson_stockmeyer::paterson_stockmeyer_required_levels;
+    use crate::ckks::bootstrapping::linear_transform::diagonal_transform_bsgs_rotation_steps;
     use crate::rns::{RnsCkksContext, RnsCkksParams, RnsPrime};
 
     fn sample_key_context() -> RnsCkksContext {
@@ -161,7 +162,10 @@ mod tests {
 
         let keys = BootstrapKeySet::for_dense_coeff_to_slot(&context, &key_pair, 3);
 
-        assert_eq!(keys.coeff_to_slot_rotation_keys.len(), context.num_slots() - 1);
+        assert_eq!(
+            keys.coeff_to_slot_rotation_keys.len(),
+            diagonal_transform_bsgs_rotation_steps(context.num_slots()).len(),
+        );
         assert!(keys.conjugation_key.is_some());
         assert!(keys.slot_to_coeff_rotation_keys.is_empty());
         assert!(keys.eval_mod_relinearization_keys.is_empty());
@@ -174,7 +178,10 @@ mod tests {
 
         let keys = BootstrapKeySet::for_coeff_to_slot(&context, &key_pair, 3, 4);
 
-        assert_eq!(keys.coeff_to_slot_rotation_keys.len(), 3);
+        assert_eq!(
+            keys.coeff_to_slot_rotation_keys.len(),
+            diagonal_transform_bsgs_rotation_steps(4).len(),
+        );
         assert!(keys.slot_to_coeff_rotation_keys.is_empty());
         assert!(keys.eval_mod_relinearization_keys.is_empty());
         assert!(keys.conjugation_key.is_none());
@@ -187,7 +194,10 @@ mod tests {
 
         let keys = BootstrapKeySet::for_dense_slot_to_coeff(&context, &key_pair, 3);
 
-        assert_eq!(keys.slot_to_coeff_rotation_keys.len(), context.num_slots() - 1);
+        assert_eq!(
+            keys.slot_to_coeff_rotation_keys.len(),
+            diagonal_transform_bsgs_rotation_steps(context.num_slots()).len(),
+        );
         assert!(keys.coeff_to_slot_rotation_keys.is_empty());
         assert!(keys.conjugation_key.is_none());
     }
@@ -199,7 +209,10 @@ mod tests {
 
         let keys = BootstrapKeySet::for_slot_to_coeff(&context, &key_pair, 3, 4);
 
-        assert_eq!(keys.slot_to_coeff_rotation_keys.len(), 3);
+        assert_eq!(
+            keys.slot_to_coeff_rotation_keys.len(),
+            diagonal_transform_bsgs_rotation_steps(4).len(),
+        );
         assert!(keys.coeff_to_slot_rotation_keys.is_empty());
         assert!(keys.eval_mod_relinearization_keys.is_empty());
         assert!(keys.conjugation_key.is_none());
